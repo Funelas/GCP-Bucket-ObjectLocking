@@ -1,0 +1,49 @@
+# === Google OAuth Secrets ===
+client_secret_*.json
+
+# === Node.js / React ===
+node_modules/
+build/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.*        
+*.local       
+
+# === React testing / coverage ===
+coverage/
+*.test.js
+*.test.ts
+*.test.tsx
+
+# === Python general ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.pyo
+*.pyd
+*.pyc
+*.pkl
+*.db
+*.sqlite3
+.venv/
+venv/
+.env/
+.cache/
+*.tmp
+*.bak
+
+# === Include specific backend files ===
+config.py
+token.pkl
+requirements.txt
+connection.py
+# === Editor settings ===
+.vscode/
+.idea/
+*.swp
+
+# === macOS ===
+.DS_Store
