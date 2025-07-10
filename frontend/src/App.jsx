@@ -12,6 +12,7 @@ function App() {
       .then((data) => {
         setFiles(data);
         setLoading(false);
+        console.log(data);
       })
       .catch((err) => {
         console.error("Failed to fetch files:", err);
@@ -22,7 +23,7 @@ function App() {
   return (
     <>
     <Header />
-    <div className="bg-gray-800 p-4 w-full h-vh shadow-md">
+    <div className="bg-gray-800 p-4 w-full">
       <FileList loading={loading} files={files} setFiles={setFiles} />
     </div>
     
