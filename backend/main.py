@@ -1,131 +1,96 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI 
 from fastapi.middleware.cors import CORSMiddleware
-from gcs_utils import list_gcs_objects, get_credentials
+from gcs_utils import get_credentials
 from google.cloud import storage
-from config import SCOPES, CREDENTIALS_FILE, TOKEN_FILE, EXPIRY_JSON_URL, SUPABASE_URL, SUPABASE_ANON_KEY, BUCKET_NAME, EXPIRY_JSON_FILENAME
+from config import SCOPES, CREDENTIALS_FILE, TOKEN_FILE, BUCKET_NAME, SUPABASE_GCSOBJECTS_ANON_KEY, SUPABASE_GCSOBJECTS_URL
 from pydantic import BaseModel
-from typing import Dict, Optional
-from dotenv import load_dotenv
+from typing import Dict, Optional, List
 from supabase import create_client
-import requests
-import json
+import math
 from collections import OrderedDict
-from io import BytesIO
-app = FastAPI()
-load_dotenv()
 
+app = FastAPI()
+client = create_client(SUPABASE_GCSOBJECTS_URL, SUPABASE_GCSOBJECTS_ANON_KEY)
 
 # Enable CORS so your frontend can call the backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",  # allow all origins for dev (including localhost:5173)
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 @app.get("/files")
-def get_files():
-    """
-    Returns a list of object names from your GCS bucket.
-    """
-    creds = get_credentials(TOKEN_FILE= TOKEN_FILE, CREDENTIALS_FILE= CREDENTIALS_FILE, SCOPES = SCOPES)
-    client = storage.Client(project="bucketdemoproject", credentials=creds)
-    return list_gcs_objects("tempbucket24", client)
+def get_files(page: int = 1, limit: int = 5, query: str = ""):
+    if query:
+        result = client.rpc("search_files", {
+            "search_query": query,
+            "page": page,
+            "page_limit": limit
+        }).execute()
+        data = result.data or []
+        total = data[0]["total_count"] if data else 0
+        print(len(data))
+    else:
+        offset = (page - 1) * limit
+        result = client.table("gcs_object") \
+            .select("*", count="exact") \
+            .order("updated_at", desc=True) \
+            .range(offset, offset + limit - 1) \
+            .execute()
 
-class MetadataUpdate(BaseModel):
-    filename: str
-    metadata: Dict[str, str]
+        data = result.data
+        total = result.count or 0
 
-@app.patch("/update-metadata")
-def update_metadata(update: MetadataUpdate):
-    creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
-    client = storage.Client(project="bucketdemoproject", credentials=creds)
-    bucket = client.bucket("tempbucket24")
-    blob = bucket.blob(update.filename)
-    blob.reload()
-    # Step 1: Clear existing metadata
-    blob.metadata = {}
-    blob.update()
-
-    # Step 2: Apply new metadata
-    blob.metadata = OrderedDict(update.metadata)
-    print(blob.metadata)
-    blob.update()
-    print(blob.metadata)
-    return {"message": f"Metadata updated for {update.filename}"}
+    return {
+        "files": data,
+        "page": page,
+        "size": limit,
+        "total": total,
+        "pages": math.ceil((total or 1) / limit)
+    }
 
 class LockStatus(BaseModel):
     temporary_hold: bool
     hold_expiry: Optional[str] = None
 
-class ObjectLock(BaseModel):
+class FileUpdate(BaseModel):
     filename: str
-    lockstatus: LockStatus
+    metadata: Optional[Dict[str, str]] = None
+    lockstatus: Optional[LockStatus] = None
 
-# Supabase client
-
-supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-
-def update_expiry_json(filename: str, hold_expiry: str):
-    try:
-        # Try to download the existing JSON file
-        response = supabase.storage.from_(BUCKET_NAME).download(EXPIRY_JSON_FILENAME)
-        json_data = json.loads(response.decode())
-    except Exception:
-        # If file doesn't exist or is invalid, start fresh
-        json_data = {}
-
-    # ✅ Each file is its own key
-    # If hold_expiry == None
-    if not hold_expiry:
-        json_data.pop(filename, None)
-    else:
-        json_data[filename] = hold_expiry
-
-    # Convert dict to JSON bytes
-    json_bytes = json.dumps(json_data, indent=2).encode("utf-8")
-    print(json_data)
-    # Upload the updated JSON to Supabase
-    supabase.storage.from_(BUCKET_NAME).upload(
-        EXPIRY_JSON_FILENAME,
-        json_bytes,
-        {
-            "content-type": "application/json",
-            "x-upsert": "true"
-        }
-    )
-
-
-
-@app.patch("/update-lock")
-def update_lock(file: ObjectLock):
+@app.patch("/update-files-batch")
+def update_files_batch(updates: List[FileUpdate]):
     creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
-    client = storage.Client(project="bucketdemoproject", credentials=creds)
-    bucket = client.bucket("tempbucket24")
-    blob = bucket.blob(file.filename)
-    
-    blob.reload()
+    gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
+    bucket = gcs_client.bucket("tempbucket24")
+    print(updates)
+    for update in updates:
+        blob = bucket.blob(update.filename)
+        blob.reload()
+        print(update.filename)
+        print(update.metadata)
+        # 1. Update metadata if provided
+        if update.metadata is not None:
+            blob.metadata = update.metadata
+            blob.patch()
 
-    # ✅ Apply temporary hold
-    blob.temporary_hold = file.lockstatus.temporary_hold
-    blob.patch()
-    print(file.lockstatus)
+        # 2. Update lock status if provided
+        if update.lockstatus is not None:
+            blob.temporary_hold = update.lockstatus.temporary_hold
+            blob.patch()
+        
+        update_info = {}
+        if update.lockstatus:
+            update_info["temporary_hold"] = update.lockstatus.temporary_hold
+            update_info["expiry_date"] = update.lockstatus.hold_expiry
+        if update.metadata:
+            update_info["metadata"] = update.metadata
+
+        # ✅ Sync to Supabase
+        result = client.table("gcs_object").update(update_info
+        ).eq("name", update.filename).execute()
 
 
-    
-    update_expiry_json(file.filename, file.lockstatus.hold_expiry)
-
-    return {"message": f"Lock updated for {file.filename}"}
-
-@app.get("/expiry-locks")
-def get_expiry_locks():
-    try:
-        response = supabase.storage.from_(BUCKET_NAME).download(EXPIRY_JSON_FILENAME)
-        data = json.loads(response.decode())
-        return data
-    except Exception as e:
-        print("❌ Error reading expiry.json:", e)
-        return {}
-
-
+    return {"message": "✅ Batch metadata and lock update complete"}

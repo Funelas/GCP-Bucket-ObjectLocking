@@ -2,34 +2,24 @@ import React, { useState, useEffect } from "react";
 import dayjs from "dayjs";
 import MetadataModal from "./MetadataModal.jsx";
 import ObjectLockModal from "./ObjectLockModal.jsx";
+import Pagination from "./Pagination.jsx";
 
-const FilesList = ({ loading, files, setFiles }) => {
+const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
   const [editingFile, setEditingFile] = useState(null);
   const [editingMetadata, setEditingMetadata] = useState(null);
   const [metadataChanges, setMetadataChanges] = useState({});
   const [lockChanges, setLockChanges] = useState({});
   const [lockingFile, setLockingFile] = useState(null);
-  const [expiryMap, setExpiryMap] = useState({});
+  
 
-  useEffect(() => {
-    const fetchExpiry = async () => {
-      try {
-        const response = await fetch("http://localhost:8000/expiry-locks");
-        const data = await response.json();
-        setExpiryMap(data);
-      } catch (err) {
-        console.error("❌ Failed to load expiry map:", err);
-      }
-    };
-
-    fetchExpiry();
-  }, []);
+  
 
   if (loading) return <p className="text-green-400">Loading...</p>;
 
   const handleEditMetadata = (filename) => {
     const existing = metadataChanges[filename];
-    const original = files[filename]?.metadata || {};
+    const fileObject = files.find((f) => f.name === filename);
+    const original = fileObject?.metadata || {};
     setEditingFile(filename);
     setEditingMetadata(existing || original);
   };
@@ -90,47 +80,66 @@ const FilesList = ({ loading, files, setFiles }) => {
   };
 
   const saveAllChanges = async () => {
-    let updatedFiles = { ...files };
-
-    for (const [filename, lockstatus] of Object.entries(lockChanges)) {
-      try {
-        await fetch("http://localhost:8000/update-lock", {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ filename, lockstatus }),
-        });
-      } catch (err) {
-        console.error(`❌ Error updating ${filename}:`, err);
+    let updatedFiles = [ ...files ];
+  
+    // Combine metadata + lockChanges into one array
+    const combinedUpdates = [];
+  
+    const filenames = new Set([
+      ...Object.keys(metadataChanges),
+      ...Object.keys(lockChanges),
+    ]);
+  
+    filenames.forEach((filename) => {
+      const entry = { filename };
+      if (metadataChanges[filename]) {
+        entry.metadata = metadataChanges[filename];
       }
-    }
-
-    for (const [filename, metadata] of Object.entries(metadataChanges)) {
-      try {
-        const response = await fetch("http://localhost:8000/update-metadata", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename, metadata }),
-        });
-
-        if (!response.ok) throw new Error(`Failed to update ${filename}`);
-
-        updatedFiles[filename] = {
-          ...updatedFiles[filename],
-          metadata: metadata,
-        };
-      } catch (err) {
-        console.error(`❌ Error updating ${filename}:`, err);
+      if (lockChanges[filename]) {
+        entry.lockstatus = lockChanges[filename];
       }
+      combinedUpdates.push(entry);
+    });
+  
+    try {
+      const response = await fetch("http://localhost:8000/update-files-batch", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(combinedUpdates),
+      });
+  
+      if (!response.ok) throw new Error("Failed to save batch updates.");
+  
+      // Apply metadataChanges to local state
+      filenames.forEach((filename) => {
+        const fileIndex = updatedFiles.findIndex((f) => f.name === filename);
+        if (fileIndex !== -1) {
+          if (metadataChanges[filename]) {
+            updatedFiles[fileIndex].metadata = metadataChanges[filename];
+          }
+          if (lockChanges[filename]) {
+            updatedFiles[fileIndex].temporary_hold = lockChanges[filename].temporary_hold;
+            updatedFiles[fileIndex].expiry_date = lockChanges[filename].hold_expiry || null;
+          }
+        }
+      });
+  
+      setFiles(updatedFiles);
+      setMetadataChanges({});
+      setLockChanges({});
+      alert("✅ All changes saved.");
+    }catch(err){
+      console.log(err);
     }
-
-    setFiles(updatedFiles);
-    setMetadataChanges({});
-    alert("✅ All changes saved.");
   };
+  
+  
+  if (!Array.isArray(files)) return <p className="text-green-400">Loading files...</p>;
+  const fileEntries = files;
 
-  const fileEntries = Object.entries(files);
+
   if (fileEntries.length === 0)
     return <p className="text-green-400">No files found.</p>;
 
@@ -150,21 +159,22 @@ const FilesList = ({ loading, files, setFiles }) => {
       <h2 className="text-green-400 text-xl mb-3">📁 Files</h2>
 
       <div className="bg-gray-800 p-4 w-full h-64 overflow-y-auto space-y-2">
-        {fileEntries.map(([filename, details], index) => {
+      {fileEntries.map((details, index) => {
+          const filename = details.name;
+
           const metadata = details.metadata || {};
           const pendingLock = lockChanges[filename];
 
           const finalLockState =
             pendingLock?.temporary_hold ?? details.temporary_hold;
 
-          // 🔍 Use expiry from lockChanges > metadata > Supabase expiry.json
-          const holdExpiryFromMap = expiryMap[filename];
 
 
           const finalExpiry =
-            pendingLock?.hold_expiry ??
-            metadata?.hold_expiry ??
-            holdExpiryFromMap;
+          pendingLock?.hold_expiry ??
+          metadata?.hold_expiry ??
+          details.expiry_date;
+          
 
           const isLocked = finalLockState === true;
           const lockDuration = isLocked
@@ -212,6 +222,8 @@ const FilesList = ({ loading, files, setFiles }) => {
           );
         })}
       </div>
+      <Pagination page={page} pages={pages} setPage={setPage} />
+
 
       {(Object.keys(metadataChanges).length > 0 ||
         Object.keys(lockChanges).length > 0) && (
