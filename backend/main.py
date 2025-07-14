@@ -1,18 +1,15 @@
-from fastapi import FastAPI 
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from gcs_utils import get_credentials
 from google.cloud import storage
-from config import SCOPES, CREDENTIALS_FILE, TOKEN_FILE, BUCKET_NAME, SUPABASE_GCSOBJECTS_ANON_KEY, SUPABASE_GCSOBJECTS_URL
+from config import SCOPES, CREDENTIALS_FILE, TOKEN_FILE, BUCKET_NAME
 from pydantic import BaseModel
 from typing import Dict, Optional, List
-from supabase import create_client
+from datetime import datetime, timezone, timedelta
 import math
-from collections import OrderedDict
 
 app = FastAPI()
-client = create_client(SUPABASE_GCSOBJECTS_URL, SUPABASE_GCSOBJECTS_ANON_KEY)
 
-# Enable CORS so your frontend can call the backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -23,28 +20,36 @@ app.add_middleware(
 
 @app.get("/files")
 def get_files(page: int = 1, limit: int = 5, query: str = ""):
-    if query:
-        result = client.rpc("search_files", {
-            "search_query": query,
-            "page": page,
-            "page_limit": limit
-        }).execute()
-        data = result.data or []
-        total = data[0]["total_count"] if data else 0
-        print(len(data))
-    else:
-        offset = (page - 1) * limit
-        result = client.table("gcs_object") \
-            .select("*", count="exact") \
-            .order("updated_at", desc=True) \
-            .range(offset, offset + limit - 1) \
-            .execute()
+    creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
+    gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
+    bucket = gcs_client.bucket(BUCKET_NAME)
 
-        data = result.data
-        total = result.count or 0
-
+    # Easier Filtering Using match_glob but only limited to object name
+    blobs = list(bucket.list_blobs())
+    
+    start = (page - 1) * limit
+    end = start + limit
+    filtered_data = []
+    for blob in blobs:
+        metadata = blob.metadata or {}
+        expiry_cutoff = datetime.now(timezone.utc) + timedelta(seconds=10)
+        if blob.temporary_hold is True or (
+                blob.retention.retain_until_time is not None and
+                blob.retention.retain_until_time > expiry_cutoff
+            ):
+            if any(query in word for word in [blob.name] + list(metadata.keys()) + list(metadata.values())):
+                blob.reload()
+                filtered_data.append({
+                    "name": blob.name,
+                    "temporary_hold": blob.temporary_hold,
+                    "expiration_date": blob.retention_expiration_time.isoformat() if blob.retention_expiration_time else None,
+                    "metadata": blob.metadata or {},
+                    "updated_at": blob.updated.isoformat() if blob.updated else None
+                })
+    total = len(filtered_data)
+    paginated_blobs = filtered_data[start:end]
     return {
-        "files": data,
+        "files": paginated_blobs,
         "page": page,
         "size": limit,
         "total": total,
@@ -53,7 +58,7 @@ def get_files(page: int = 1, limit: int = 5, query: str = ""):
 
 class LockStatus(BaseModel):
     temporary_hold: bool
-    hold_expiry: Optional[str] = None
+    hold_expiry: Optional[str] = None  # ISO string like "2025-07-31"
 
 class FileUpdate(BaseModel):
     filename: str
@@ -64,33 +69,29 @@ class FileUpdate(BaseModel):
 def update_files_batch(updates: List[FileUpdate]):
     creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
     gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
-    bucket = gcs_client.bucket("tempbucket24")
-    print(updates)
+    bucket = gcs_client.bucket(BUCKET_NAME)
     for update in updates:
         blob = bucket.blob(update.filename)
         blob.reload()
-        print(update.filename)
-        print(update.metadata)
-        # 1. Update metadata if provided
         if update.metadata is not None:
             blob.metadata = update.metadata
             blob.patch()
 
-        # 2. Update lock status if provided
-        if update.lockstatus is not None:
+        if update.lockstatus:
             blob.temporary_hold = update.lockstatus.temporary_hold
             blob.patch()
-        
-        update_info = {}
-        if update.lockstatus:
-            update_info["temporary_hold"] = update.lockstatus.temporary_hold
-            update_info["expiry_date"] = update.lockstatus.hold_expiry
-        if update.metadata:
-            update_info["metadata"] = update.metadata
 
-        # ✅ Sync to Supabase
-        result = client.table("gcs_object").update(update_info
-        ).eq("name", update.filename).execute()
-
+            if update.lockstatus.hold_expiry:
+                blob.retention.mode = "Unlocked"
+                expiry_dt = datetime.fromisoformat(update.lockstatus.hold_expiry).replace(tzinfo=timezone.utc)
+                blob.retention.retain_until_time = expiry_dt
+                blob.patch(override_unlocked_retention=True)
+                print("Saved Retention Time")
+            else:
+                blob.retention.mode = "Unlocked"
+                new_time = datetime.now(timezone.utc) + timedelta(seconds= 10)
+                blob.retention.retain_until_time = new_time
+                blob.patch(override_unlocked_retention=True)
+            
 
     return {"message": "✅ Batch metadata and lock update complete"}

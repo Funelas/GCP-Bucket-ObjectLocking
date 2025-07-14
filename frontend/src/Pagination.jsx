@@ -1,8 +1,6 @@
 import React from "react";
 
 const Pagination = ({ page, pages, setPage }) => {
-    console.log("Pagination Pages:");
-    console.log(pages)
   const maxVisible = 5;
 
   const getPagination = () => {

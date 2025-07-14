@@ -7,21 +7,22 @@ import "react-datepicker/dist/react-datepicker.css";
 const ObjectLockModal = ({ filename, onClose }) => {
   const [showCalendar, setShowCalendar] = useState(true);
   const [selectedDate, setSelectedDate] = useState(null);
+  const [isIndefinite, setIsIndefinite] = useState(false);
 
   const handleDateChange = (date) => {
     setSelectedDate(date);
-    setShowCalendar(false); // optional: auto-close after pick
+    setIsIndefinite(false); // Disable "indefinite" if a date is selected
+    setShowCalendar(false); // Auto-close calendar (optional)
   };
 
   const handleSave = () => {
-    if (!selectedDate) {
-      alert("Please select a date.");
+    if (!selectedDate && !isIndefinite) {
+      alert("Please select a date or choose Indefinite.");
       return;
     }
-    
-    const formattedDate = format(selectedDate, "yyyy-MM-dd");
-    console.log(typeof formattedDate);
-    onClose(filename, null, formattedDate);
+
+    const resultDate = isIndefinite ? null : format(selectedDate, "yyyy-MM-dd");
+    onClose(filename, null, resultDate);
   };
 
   return (
@@ -33,13 +34,19 @@ const ObjectLockModal = ({ filename, onClose }) => {
 
         <label className="block mb-1 text-green-300 font-medium">Select Lock Expiry Date</label>
 
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-3">
           <input
             type="text"
-            value={selectedDate ? format(selectedDate, "yyyy-MM-dd") : ""}
+            value={
+              isIndefinite
+                ? "Indefinite"
+                : selectedDate
+                ? format(selectedDate, "yyyy-MM-dd")
+                : ""
+            }
             readOnly
             className="bg-gray-800 text-white p-2 rounded border border-gray-600 w-full"
-            placeholder="Pick a date"
+            placeholder="Pick a date or select Indefinite"
           />
           <button
             onClick={() => setShowCalendar(!showCalendar)}
@@ -50,7 +57,7 @@ const ObjectLockModal = ({ filename, onClose }) => {
           </button>
         </div>
 
-        {showCalendar && (
+        {showCalendar && !isIndefinite && (
           <div className="mt-2">
             <DatePicker
               selected={selectedDate}
@@ -60,6 +67,21 @@ const ObjectLockModal = ({ filename, onClose }) => {
             />
           </div>
         )}
+
+        <div className="flex items-center gap-2 mt-2">
+          <input
+            type="checkbox"
+            id="indefinite"
+            checked={isIndefinite}
+            onChange={() => {
+              setIsIndefinite(!isIndefinite);
+              if (!isIndefinite) setSelectedDate(null);
+            }}
+          />
+          <label htmlFor="indefinite" className="text-sm text-green-300">
+            Set lock to <strong>Indefinite</strong> (no expiration)
+          </label>
+        </div>
 
         <div className="flex justify-end gap-3 mt-6">
           <button

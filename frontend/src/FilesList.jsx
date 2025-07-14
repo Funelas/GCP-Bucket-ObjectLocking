@@ -3,7 +3,7 @@ import dayjs from "dayjs";
 import MetadataModal from "./MetadataModal.jsx";
 import ObjectLockModal from "./ObjectLockModal.jsx";
 import Pagination from "./Pagination.jsx";
-
+import LockByUrlInput from "./LockByUrlInput.jsx";
 const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
   const [editingFile, setEditingFile] = useState(null);
   const [editingMetadata, setEditingMetadata] = useState(null);
@@ -11,14 +11,36 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
   const [lockChanges, setLockChanges] = useState({});
   const [lockingFile, setLockingFile] = useState(null);
   
-
-  
-
   if (loading) return <p className="text-green-400">Loading...</p>;
-
+  const addFileToList = (filename) => {
+    const alreadyExists = files.some((f) => f.name === filename);
+    if (alreadyExists) return;
+  
+    const newFile = {
+      name: filename,
+      temporary_hold: false,
+      expiration_date: null,
+      metadata: {},
+      updated_at: new Date().toISOString(),
+    };
+  
+    const newFiles = [...files, newFile];
+    setFiles(newFiles);
+  
+    const pageCapacity = 5;
+    const newTotal = newFiles.length;
+    const newLastPage = Math.ceil(newTotal / pageCapacity);
+  
+    if (page !== newLastPage) {
+      setPage(newLastPage);
+    }
+  };
+  
   const handleEditMetadata = (filename) => {
     const existing = metadataChanges[filename];
     const fileObject = files.find((f) => f.name === filename);
+    console.log("File Object");
+    console.log(fileObject);
     const original = fileObject?.metadata || {};
     setEditingFile(filename);
     setEditingMetadata(existing || original);
@@ -30,27 +52,23 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
         ...prev,
         [filename]: updatedMetadata,
       }));
-    } else if (updatedLockStatus && typeof updatedLockStatus === "string") {
+    } else if (updatedLockStatus !== undefined) {
+      const isIndefinite = updatedLockStatus === null;
+
       setLockChanges((prev) => ({
         ...prev,
         [filename]: {
-          temporary_hold: true,
-          hold_expiry: updatedLockStatus,
+          temporary_hold: isIndefinite, // true for indefinite lock
+          hold_expiry: isIndefinite ? null : updatedLockStatus, // null if indefinite, else date
         },
       }));
-    // } else if (updatedLockStatus === false) {
-    //   setLockChanges((prev) => ({
-    //     ...prev,
-    //     [filename]: { temporary_hold: false },
-    //   }));
     }
 
     setEditingFile(null);
     setEditingMetadata(null);
     setLockingFile(null);
-    console.log("Hello");
-    console.log(lockChanges);
   };
+
 
   const calculateLockDuration = (holdExpiry) => {
     if (!holdExpiry) return "Indefinite";
@@ -64,11 +82,16 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
 
   const handleToggleLock = (filename, currentLockState) => {
     if (currentLockState) {
+      // 🔓 Unlock
       setLockChanges((prev) => ({
         ...prev,
-        [filename]: { temporary_hold: false },
+        [filename]: {
+          temporary_hold: false,
+          hold_expiry: dayjs().add(10, 'second'), // 💥 explicitly set to null to override old expiration
+        },
       }));
     } else {
+      // 🔒 Lock
       setLockingFile(filename);
       setLockChanges((prev) => {
         const filtered = Object.fromEntries(
@@ -78,6 +101,8 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
       });
     }
   };
+  
+  
 
   const saveAllChanges = async () => {
     let updatedFiles = [ ...files ];
@@ -89,18 +114,25 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
       ...Object.keys(metadataChanges),
       ...Object.keys(lockChanges),
     ]);
-  
+    
     filenames.forEach((filename) => {
       const entry = { filename };
       if (metadataChanges[filename]) {
         entry.metadata = metadataChanges[filename];
       }
       if (lockChanges[filename]) {
-        entry.lockstatus = lockChanges[filename];
+        console.log("It goes in lockchanges process")
+        const { temporary_hold, hold_expiry } = lockChanges[filename];
+        const entryLock = { temporary_hold };
+        if (hold_expiry) {
+          entryLock.hold_expiry = hold_expiry;  // 🔥 Include inside lockstatus
+        }
+        entry.lockstatus = entryLock;  // ✅ assign final object with retention_days
       }
+      
       combinedUpdates.push(entry);
+      
     });
-  
     try {
       const response = await fetch("http://localhost:8000/update-files-batch", {
         method: "PATCH",
@@ -120,9 +152,25 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
             updatedFiles[fileIndex].metadata = metadataChanges[filename];
           }
           if (lockChanges[filename]) {
-            updatedFiles[fileIndex].temporary_hold = lockChanges[filename].temporary_hold;
-            updatedFiles[fileIndex].expiry_date = lockChanges[filename].hold_expiry || null;
+            const { temporary_hold, hold_expiry } = lockChanges[filename];
+            updatedFiles[fileIndex].temporary_hold = temporary_hold;
+          
+            // ✅ Clear expiration properly on unlock
+            if (temporary_hold === false && !hold_expiry) {
+              updatedFiles[fileIndex].expiration_date = null;
+            } else {
+              updatedFiles[fileIndex].expiration_date = hold_expiry;
+            }
+
+            if (
+              lockChanges[filename].temporary_hold === false &&
+              lockChanges[filename].hold_expiry === null
+            ) {
+              updatedFiles[fileIndex].expiration_date = null;
+            }
           }
+          
+        
         }
       });
   
@@ -157,12 +205,14 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
       )}
 
       <h2 className="text-green-400 text-xl mb-3">📁 Files</h2>
+      <LockByUrlInput onAdd={setLockingFile} onFileAdd={addFileToList} />
 
       <div className="bg-gray-800 p-4 w-full h-64 overflow-y-auto space-y-2">
       {fileEntries.map((details, index) => {
           const filename = details.name;
+          const pendingMetadata = metadataChanges[filename];
+          const metadata = pendingMetadata || details.metadata || {};
 
-          const metadata = details.metadata || {};
           const pendingLock = lockChanges[filename];
 
           const finalLockState =
@@ -170,16 +220,18 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
 
 
 
-          const finalExpiry =
-          pendingLock?.hold_expiry ??
-          metadata?.hold_expiry ??
-          details.expiry_date;
-          
+          const finalExpiry = pendingLock?.hold_expiry ?? details.expiration_date;
 
-          const isLocked = finalLockState === true;
-          const lockDuration = isLocked
-            ? calculateLockDuration(finalExpiry)
-            : null;
+          // Check if expiry is in the future
+          const now = dayjs().add(30, 'second');
+          const expiryDate = finalExpiry ? dayjs(finalExpiry) : null;
+          const isExpiryValid = expiryDate && expiryDate.isAfter(now);
+          
+          // ✅ Only locked if temporary_hold is true or future-dated expiry
+          const isLocked = finalLockState === true || isExpiryValid;
+          
+          const lockDuration = isLocked ? calculateLockDuration(finalExpiry) : null;
+
           const isModified = metadataChanges.hasOwnProperty(filename);
 
           return (
@@ -189,7 +241,11 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
                 isModified ? "border-l-4 border-yellow-400" : ""
               }`}
             >
-              <div className="w-[50%] text-left truncate">{filename}</div>
+              <div className="w-[30%] text-left truncate">{filename}</div>
+              <div className="w-[20%] text-xs text-green-400">
+                <div>Project: {metadata.project || "None"}</div>
+                <div>Category: {metadata.category || "None"}</div>
+              </div>
 
               {isLocked ? (
                 <div className="w-[20%] text-left text-yellow-300 text-sm">
