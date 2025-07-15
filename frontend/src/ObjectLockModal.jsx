@@ -20,10 +20,13 @@ const ObjectLockModal = ({ filename, onClose }) => {
       alert("Please select a date or choose Indefinite.");
       return;
     }
-
+  
     const resultDate = isIndefinite ? null : format(selectedDate, "yyyy-MM-dd");
-    onClose(filename, null, resultDate);
+  
+    // 👇 Now send the updateType too
+    onClose(filename, resultDate, "lock");
   };
+  
 
   return (
     <div className="fixed inset-0 backdrop-blur-lg flex items-center justify-center z-50 transition-opacity duration-500 ease-in-out">

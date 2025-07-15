@@ -26,9 +26,11 @@ const MetadataModal = ({ filename, metadata, onClose }) => {
         metadataObj[key.trim()] = value.trim();
       }
     });
+  
     console.log("📂 Final Metadata:", metadataObj);
-    onClose(filename, metadataObj);
+    onClose(filename, metadataObj, "metadata"); // 👈 Explicitly pass the update type
   };
+  
 
   return (
     <div className="fixed inset-0 backdrop-blur-lg flex items-center justify-center z-50 transition-opacity duration-1000 ease-in-out">

@@ -95,3 +95,15 @@ def update_files_batch(updates: List[FileUpdate]):
             
 
     return {"message": "✅ Batch metadata and lock update complete"}
+
+@app.get("/check-object-exists")
+def check_object_exists(filename: str):
+    creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
+    gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
+    bucket = gcs_client.bucket(BUCKET_NAME)
+    blob = bucket.get_blob(filename)
+    
+    if blob:
+        return {"exists": True}
+    return {"exists": False}
+

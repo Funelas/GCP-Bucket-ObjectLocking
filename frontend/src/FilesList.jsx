@@ -31,9 +31,9 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
     const newTotal = newFiles.length;
     const newLastPage = Math.ceil(newTotal / pageCapacity);
   
-    if (page !== newLastPage) {
-      setPage(newLastPage);
-    }
+    // if (page !== newLastPage) {
+    //   setPage(newLastPage);
+    // }
   };
   
   const handleEditMetadata = (filename) => {
@@ -46,39 +46,49 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
     setEditingMetadata(existing || original);
   };
 
-  const closeModal = (filename, updatedMetadata = null, updatedLockStatus = null) => {
-    if (updatedMetadata) {
+  const closeModal = (filename, update = null, updateType = null) => {
+    if (updateType === "metadata" && update) {
       setMetadataChanges((prev) => ({
         ...prev,
-        [filename]: updatedMetadata,
+        [filename]: update,
       }));
-    } else if (updatedLockStatus !== undefined) {
-      const isIndefinite = updatedLockStatus === null;
-
+    } else if (updateType === "lock") {
+      const isIndefinite = update === null;
+  
       setLockChanges((prev) => ({
         ...prev,
         [filename]: {
-          temporary_hold: isIndefinite, // true for indefinite lock
-          hold_expiry: isIndefinite ? null : updatedLockStatus, // null if indefinite, else date
+          temporary_hold: isIndefinite,
+          hold_expiry: isIndefinite ? null : update,
         },
       }));
     }
-
+  
     setEditingFile(null);
     setEditingMetadata(null);
     setLockingFile(null);
   };
+  
 
 
   const calculateLockDuration = (holdExpiry) => {
     if (!holdExpiry) return "Indefinite";
+  
     const now = dayjs();
     const expiry = dayjs(holdExpiry);
+  
+    // 👉 Treat anything 30 seconds or more into the future as indefinite
+    if (expiry.diff(now, "second") <= 30) {
+      return "Indefinite";
+    }
+  
     const diff = expiry.diff(now, "day");
+  
     if (diff > 0) return `${diff} day(s) left`;
     if (diff === 0) return "Expires today";
     return `Expired ${Math.abs(diff)} day(s) ago`;
   };
+  
 
   const handleToggleLock = (filename, currentLockState) => {
     if (currentLockState) {
@@ -121,10 +131,11 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
         entry.metadata = metadataChanges[filename];
       }
       if (lockChanges[filename]) {
-        console.log("It goes in lockchanges process")
+        
         const { temporary_hold, hold_expiry } = lockChanges[filename];
         const entryLock = { temporary_hold };
         if (hold_expiry) {
+          console.log("It goes in hold expiry process");
           entryLock.hold_expiry = hold_expiry;  // 🔥 Include inside lockstatus
         }
         entry.lockstatus = entryLock;  // ✅ assign final object with retention_days

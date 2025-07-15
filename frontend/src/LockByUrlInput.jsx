@@ -18,17 +18,32 @@ const LockByUrlInput = ({ onAdd, onFileAdd }) => {
       }
     };
   
-    const handleAddClick = () => {
+    const handleAddClick = async () => {
       const extracted = handleExtractFilename(url);
-      console.log(extracted);
       if (!extracted) {
         alert("❌ Invalid URL");
         return;
       }
-      onAdd(extracted);
-      onFileAdd(extracted);
-      setUrl("")
+    
+      // Check with backend if blob exists
+      try {
+        const res = await fetch(`http://localhost:8000/check-object-exists?filename=${encodeURIComponent(extracted)}`);
+        const data = await res.json();
+    
+        if (!data.exists) {
+          alert("❌ Object does not exist in the bucket.");
+          return;
+        }
+    
+        onAdd(extracted);
+        onFileAdd(extracted);
+        setUrl("");
+      } catch (err) {
+        console.error("Error checking object:", err);
+        alert("⚠️ Could not verify the object.");
+      }
     };
+    
   
   
     return (
