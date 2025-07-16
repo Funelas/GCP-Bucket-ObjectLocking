@@ -3,10 +3,9 @@ import pickle
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.cloud import storage
-
-# -----------------------🔐 PART 1: LOGIN + DISPLAY -----------------------
-
-
+import json
+from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 def get_credentials(TOKEN_FILE, CREDENTIALS_FILE, SCOPES):
     creds = None
@@ -33,46 +32,94 @@ def list_gcs_objects(bucket_name, client):
         "metadata": blob.metadata}
         for blob in blobs }
 
+def update_blob_entry_in_locked_json(bucket, filename, blob):
+    lock_blob = get_locked_file_with_generation(bucket)
+    lock_blob.reload()
+    generation = lock_blob.generation
+
+    try:
+        locked_data = json.loads(lock_blob.download_as_bytes())
+    except Exception:
+        locked_data = {}
+
+    # Refresh blob metadata
+    blob.reload()
+    locked_data[filename] = {
+        "temporary_hold": blob.temporary_hold,
+        "expiration_date": blob.retention_expiration_time.isoformat() if blob.retention_expiration_time else None,
+        "metadata": blob.metadata or {},
+        "updated_at": blob.updated.isoformat() if blob.updated else None,
+        "generation": blob.generation,
+    }
+
+    # Write it back using generation check
+    lock_blob.upload_from_string(
+        json.dumps(locked_data, indent=2),
+        content_type="application/json",
+        if_generation_match=generation
+    )
+
+def get_locked_file_with_generation(bucket):
+    blob = bucket.get_blob(f"{bucket.name}_locked_objects.json")
+
+    # If file already exists, just read and return
+    if blob:
+        blob.reload()
+        data = blob.download_as_bytes()
+        return json.loads(data), blob.generation
+
+    # ⏳ File does not exist: scan all blobs to find locked ones
+    now = datetime.now(timezone.utc) + timedelta(seconds=30)  # Expiry buffer
+    locked_data = {}
+
+    for b in bucket.list_blobs():
+        b.reload()
+
+        is_locked = (
+            b.temporary_hold is True or
+            (b.retention_expiration_time and b.retention_expiration_time > now)
+        )
+
+        if is_locked:
+            locked_data[b.name] = {
+                "temporary_hold": b.temporary_hold,
+                "expiration_date": b.retention_expiration_time.isoformat() if b.retention_expiration_time else None,
+                "metadata": b.metadata or {},
+                "updated_at": b.updated.isoformat() if b.updated else None,
+                "generation": b.generation,
+            }
+
+    blob = bucket.blob(f"{bucket.name}_locked_objects.json")
+    # 📥 Upload the initialized file
+    blob.upload_from_string(
+        json.dumps(locked_data, indent=2),
+        content_type="application/json"
+    )
+
+    blob.temporary_hold = True
+    blob.patch()
+    blob.reload()
+
+    return locked_data, blob.generation
 
 
-# -----------------------🛠️ PART 2: MODIFY OBJECTS -----------------------
+def update_locked_file(bucket, new_data: dict, generation: Optional[int]):
+    blob = bucket.blob(f"{bucket.name}_locked_objects.json")
 
-# 👆 Upload a file
-# def upload_to_bucket(bucket_name, source_file_path, destination_blob_name, client):
-#     bucket = client.bucket(bucket_name)
-#     blob = bucket.blob(destination_blob_name)
-#     blob.upload_from_filename(source_file_path)
-#     print(f"✅ Uploaded '{source_file_path}' to 'gs://{bucket_name}/{destination_blob_name}'")
+    # 1. Release temporary hold (and commit it)
+    blob.temporary_hold = False
+    blob.patch()
 
-# 🖑️ Delete a file
-# def delete_blob(bucket_name, blob_name, client):
-#     bucket = client.bucket(bucket_name)
-#     blob = bucket.blob(blob_name)
-#     blob.delete()
-#     print(f"🖑️ Deleted blob '{blob_name}' from bucket '{bucket_name}'")
+    # 2. Upload updated content (with generation check)
+    blob.upload_from_string(
+        json.dumps(new_data, indent=2),
+        content_type="application/json",
+        if_generation_match=generation
+    )
 
-# 🕵️ View all attributes of a blob
-# def print_blob_attributes(bucket_name, blob_name, client):
-#     bucket = client.bucket(bucket_name)
-#     blob = bucket.get_blob(blob_name)
+    # 3. Reapply temporary hold (optional)
+    blob.temporary_hold = True
+    blob.patch()
 
-#     if blob is None:
-#         print(f"❌ Blob '{blob_name}' not found in bucket '{bucket_name}'")
-#         return
 
-#     print(f"\n📦 All attributes of blob '{blob_name}':")
-#     for attr in dir(blob):
-#         if not attr.startswith("_") and not callable(getattr(blob, attr)):
-#             try:
-#                 value = getattr(blob, attr)
-#                 print(f"{attr}: {value}")
-#             except Exception as e:
-#                 print(f"{attr}: ⚠️ Error reading this attribute ({e})")
 
-# -----------------------🔒 PART 3: CLEANUP + SECURITY -----------------------
-
-# 🩼 Optional: Clear credentials/token if needed (for logout)
-# def clear_credentials():
-#     if os.path.exists(TOKEN_FILE):
-#         os.remove(TOKEN_FILE)
-#         print("🩹 Removed saved token. You'll need to log in again next time.")

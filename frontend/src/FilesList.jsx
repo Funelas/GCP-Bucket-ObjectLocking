@@ -4,13 +4,30 @@ import MetadataModal from "./MetadataModal.jsx";
 import ObjectLockModal from "./ObjectLockModal.jsx";
 import Pagination from "./Pagination.jsx";
 import LockByUrlInput from "./LockByUrlInput.jsx";
+import { loadChangesFromSession, saveChangesToSession } from "./utils/sessionUtils.js";
+
 const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
   const [editingFile, setEditingFile] = useState(null);
   const [editingMetadata, setEditingMetadata] = useState(null);
   const [metadataChanges, setMetadataChanges] = useState({});
   const [lockChanges, setLockChanges] = useState({});
   const [lockingFile, setLockingFile] = useState(null);
-  
+  useEffect(() => {
+    console.log("Loaded metadataChanges:", metadataChanges);
+    console.log("Loaded lockChanges:", lockChanges);
+  }, [metadataChanges, lockChanges]);
+  // Load from sessionStorage on mount
+  useEffect(() => {
+    const { metadataChanges, lockChanges } = loadChangesFromSession();
+    setMetadataChanges(metadataChanges);
+    setLockChanges(lockChanges);
+  }, []);
+
+  // Save to sessionStorage when either changes
+  useEffect(() => {
+    saveChangesToSession(metadataChanges, lockChanges);
+  }, [metadataChanges, lockChanges]);
+
   if (loading) return <p className="text-green-400">Loading...</p>;
   const addFileToList = (filename) => {
     const alreadyExists = files.some((f) => f.name === filename);
@@ -243,14 +260,16 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
           
           const lockDuration = isLocked ? calculateLockDuration(finalExpiry) : null;
 
-          const isModified = metadataChanges.hasOwnProperty(filename);
+          const isModified =
+          metadataChanges.hasOwnProperty(filename) ||
+          lockChanges.hasOwnProperty(filename);
 
+          
           return (
             <div
               key={index}
-              className={`bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-600 transition flex min-h-[40px] items-center ${
-                isModified ? "border-l-4 border-yellow-400" : ""
-              }`}
+              className={`bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-600 transition flex min-h-[40px] items-center ${isModified ? "border-l-4 border-yellow-400" : ""}
+              `}
             >
               <div className="w-[30%] text-left truncate">{filename}</div>
               <div className="w-[20%] text-xs text-green-400">
