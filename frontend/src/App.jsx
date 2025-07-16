@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import Header from "./Header.jsx";
 import FileList from "./FilesList.jsx";
-
+import { loadChangesFromSession, saveChangesToSession } from "./utils/sessionUtils.js";
 function App() {
   const [files, setFiles] = useState({});
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  // const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
+  
+  const [allFiles, setAllFiles] = useState([]); // store full list from backend
+  const [page, setPage] = useState(1);
+  const pageSize = 5;
 
   const [search, setSearch] = useState("");        // actual query
   const [searchInput, setSearchInput] = useState("");  // controlled input
@@ -19,28 +23,30 @@ function App() {
   useEffect(() => {
     const fetchFiles = async () => {
       setLoading(true);
-
       try {
         const url = new URL("http://localhost:8000/files");
-        url.searchParams.append("page", page);
-        url.searchParams.append("limit", 5);
         if (search) url.searchParams.append("query", search);
-
+  
         const res = await fetch(url);
         const data = await res.json();
-
-        setFiles(data.files);
-        setPages(data.pages);
+  
+        // ✅ Re-merge unsaved new files (after loading them from session!)
+        const { newFiles } = loadChangesFromSession();
+        const combined = [...data.files || [], ...(newFiles || [])];
+  
+        setAllFiles(combined);
+        setPage(1);
       } catch (err) {
         console.error("Failed to fetch files:", err);
       } finally {
         setLoading(false);
       }
     };
-
+  
     fetchFiles();
-  }, [page, search]);
-
+  }, [search]);
+  
+  
   return (
     <>
       <Header
@@ -49,14 +55,14 @@ function App() {
         onSearchSubmit={handleSearchSubmit}
       />
       <div className="bg-gray-800 p-4 w-full">
-        <FileList
-          loading={loading}
-          files={files}
-          setFiles={setFiles}
-          page={page}
-          setPage={setPage}
-          pages={pages}
-        />
+      <FileList
+        loading={loading}
+        allFiles={allFiles}
+        setAllFiles={setAllFiles}
+        page={page}
+        setPage={setPage}
+      />
+
       </div>
     </>
   );

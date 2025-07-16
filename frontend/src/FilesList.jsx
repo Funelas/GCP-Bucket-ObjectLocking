@@ -6,31 +6,47 @@ import Pagination from "./Pagination.jsx";
 import LockByUrlInput from "./LockByUrlInput.jsx";
 import { loadChangesFromSession, saveChangesToSession } from "./utils/sessionUtils.js";
 
-const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
+const FilesList = ({ loading, allFiles, setAllFiles, page, setPage }) => {
+  const [pages, setPages] = useState(1);
+  const [visibleFiles, setVisibleFiles] = useState([]);
+
+  const pageSize = 5;
   const [editingFile, setEditingFile] = useState(null);
   const [editingMetadata, setEditingMetadata] = useState(null);
   const [metadataChanges, setMetadataChanges] = useState({});
   const [lockChanges, setLockChanges] = useState({});
   const [lockingFile, setLockingFile] = useState(null);
+  const [newFiles, setNewFiles] = useState([]);
+
+  useEffect(() => {
+    const total = allFiles.length;
+    setPages(Math.ceil(total / pageSize));
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    setVisibleFiles(allFiles.slice(start, end));
+  }, [allFiles, page]);
+  
   useEffect(() => {
     console.log("Loaded metadataChanges:", metadataChanges);
     console.log("Loaded lockChanges:", lockChanges);
   }, [metadataChanges, lockChanges]);
   // Load from sessionStorage on mount
   useEffect(() => {
-    const { metadataChanges, lockChanges } = loadChangesFromSession();
+    const { metadataChanges, lockChanges, newFiles: savedNewFiles } = loadChangesFromSession();
     setMetadataChanges(metadataChanges);
     setLockChanges(lockChanges);
+    setNewFiles(savedNewFiles); // ✅ load new files too
+
   }, []);
 
   // Save to sessionStorage when either changes
   useEffect(() => {
-    saveChangesToSession(metadataChanges, lockChanges);
-  }, [metadataChanges, lockChanges]);
+    saveChangesToSession(metadataChanges, lockChanges, newFiles);
+  }, [metadataChanges, lockChanges, newFiles]);
 
   if (loading) return <p className="text-green-400">Loading...</p>;
   const addFileToList = (filename) => {
-    const alreadyExists = files.some((f) => f.name === filename);
+    const alreadyExists = allFiles.some((f) => f.name === filename) || newFiles.some(f => f.name === filename);
     if (alreadyExists) return;
   
     const newFile = {
@@ -41,21 +57,21 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
       updated_at: new Date().toISOString(),
     };
   
-    const newFiles = [...files, newFile];
-    setFiles(newFiles);
+    const combined = [...allFiles, newFile];
+    setAllFiles(combined);
   
-    const pageCapacity = 5;
-    const newTotal = newFiles.length;
-    const newLastPage = Math.ceil(newTotal / pageCapacity);
+    // ✅ Add to newFiles too
+    setNewFiles((prev) => [...prev, newFile]);
   
-    // if (page !== newLastPage) {
-    //   setPage(newLastPage);
-    // }
+    const newTotal = combined.length;
+    const newLastPage = Math.ceil(newTotal / pageSize);
+    setPage(newLastPage);
   };
+  
   
   const handleEditMetadata = (filename) => {
     const existing = metadataChanges[filename];
-    const fileObject = files.find((f) => f.name === filename);
+    const fileObject = allFiles.find((f) => f.name === filename);
     console.log("File Object");
     console.log(fileObject);
     const original = fileObject?.metadata || {};
@@ -132,7 +148,7 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
   
 
   const saveAllChanges = async () => {
-    let updatedFiles = [ ...files ];
+    let updatedFiles = [ ...allFiles ];
   
     // Combine metadata + lockChanges into one array
     const combinedUpdates = [];
@@ -202,7 +218,8 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
         }
       });
   
-      setFiles(updatedFiles);
+      setAllFiles(updatedFiles);
+      setNewFiles([]);  // ✅ reset new unsaved additions
       setMetadataChanges({});
       setLockChanges({});
       alert("✅ All changes saved.");
@@ -212,8 +229,8 @@ const FilesList = ({ loading, files, setFiles, page, setPage, pages }) => {
   };
   
   
-  if (!Array.isArray(files)) return <p className="text-green-400">Loading files...</p>;
-  const fileEntries = files;
+  if (!Array.isArray(allFiles)) return <p className="text-green-400">Loading files...</p>;
+  const fileEntries = visibleFiles;
 
 
   if (fileEntries.length === 0)

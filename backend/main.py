@@ -52,18 +52,9 @@ def get_files(
                 "metadata": info.get("metadata", {}),
                 "updated_at": info.get("updated_at")
             })
-    # 📄 Apply pagination
-    total = len(filtered)
-    start = (page - 1) * limit
-    end = start + limit
-    paginated_files = filtered[start:end]
 
     return {
-        "files": paginated_files,
-        "page": page,
-        "size": limit,
-        "total": total,
-        "pages": math.ceil((total or 1) / limit)
+        "files": filtered,
     }
 
 class LockStatus(BaseModel):
