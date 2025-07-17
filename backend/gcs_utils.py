@@ -33,10 +33,8 @@ def list_gcs_objects(bucket_name, client):
         for blob in blobs }
 
 def update_blob_entry_in_locked_json(bucket, filename, blob):
-    lock_blob = get_locked_file_with_generation(bucket)
-    lock_blob.reload()
+    lock_blob = bucket.get_blob(f"{bucket.name}_locked_objects.json")
     generation = lock_blob.generation
-
     try:
         locked_data = json.loads(lock_blob.download_as_bytes())
     except Exception:
@@ -44,12 +42,15 @@ def update_blob_entry_in_locked_json(bucket, filename, blob):
 
     # Refresh blob metadata
     blob.reload()
+    lock_blob.temporary_hold = False
+    lock_blob.patch()
+    
     locked_data[filename] = {
         "temporary_hold": blob.temporary_hold,
         "expiration_date": blob.retention_expiration_time.isoformat() if blob.retention_expiration_time else None,
         "metadata": blob.metadata or {},
         "updated_at": blob.updated.isoformat() if blob.updated else None,
-        "generation": blob.generation,
+        "metageneration": blob.metageneration,
     }
 
     # Write it back using generation check
@@ -58,11 +59,13 @@ def update_blob_entry_in_locked_json(bucket, filename, blob):
         content_type="application/json",
         if_generation_match=generation
     )
+    lock_blob.temporary_hold = True
+    lock_blob.patch()
 
 def get_locked_file_with_generation(bucket):
     blob = bucket.get_blob(f"{bucket.name}_locked_objects.json")
 
-    # If file already exists, just read and return
+    # If file already exists, just read and return, automatically gets the latest version
     if blob:
         blob.reload()
         data = blob.download_as_bytes()
@@ -74,7 +77,8 @@ def get_locked_file_with_generation(bucket):
 
     for b in bucket.list_blobs():
         b.reload()
-
+        if "locked_objects" in b.name:
+            continue
         is_locked = (
             b.temporary_hold is True or
             (b.retention_expiration_time and b.retention_expiration_time > now)
@@ -86,16 +90,19 @@ def get_locked_file_with_generation(bucket):
                 "expiration_date": b.retention_expiration_time.isoformat() if b.retention_expiration_time else None,
                 "metadata": b.metadata or {},
                 "updated_at": b.updated.isoformat() if b.updated else None,
-                "generation": b.generation,
+                "metageneration": b.metageneration,
             }
 
     blob = bucket.blob(f"{bucket.name}_locked_objects.json")
-    # 📥 Upload the initialized file
-    blob.upload_from_string(
-        json.dumps(locked_data, indent=2),
-        content_type="application/json"
-    )
-
+    blob.temporary_hold = False
+    blob.patch()
+    try:
+        blob.upload_from_string(
+            json.dumps(locked_data, indent=2),
+            content_type="application/json"
+        )
+    except Exception as e:
+        print(e)
     blob.temporary_hold = True
     blob.patch()
     blob.reload()

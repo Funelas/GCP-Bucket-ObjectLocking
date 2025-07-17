@@ -6,7 +6,7 @@ import Pagination from "./Pagination.jsx";
 import LockByUrlInput from "./LockByUrlInput.jsx";
 import { loadChangesFromSession, saveChangesToSession } from "./utils/sessionUtils.js";
 
-const FilesList = ({ loading, allFiles, setAllFiles, page, setPage }) => {
+const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, fetchFiles, currentLockFileGeneration}) => {
   const [pages, setPages] = useState(1);
   const [visibleFiles, setVisibleFiles] = useState([]);
 
@@ -148,6 +148,7 @@ const FilesList = ({ loading, allFiles, setAllFiles, page, setPage }) => {
   
 
   const saveAllChanges = async () => {
+    setLoading(true);
     let updatedFiles = [ ...allFiles ];
   
     // Combine metadata + lockChanges into one array
@@ -177,16 +178,20 @@ const FilesList = ({ loading, allFiles, setAllFiles, page, setPage }) => {
       combinedUpdates.push(entry);
       
     });
+    const new_data = {
+      "updates" : combinedUpdates,
+      "currentGeneration" : String(currentLockFileGeneration)
+    }
     try {
       const response = await fetch("http://localhost:8000/update-files-batch", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(combinedUpdates),
+        body: JSON.stringify(new_data),
       });
   
-      if (!response.ok) throw new Error("Failed to save batch updates.");
+      if (!response.ok) throw new Error("Lock File Generation Mismatch. Please refresh webpage.");
   
       // Apply metadataChanges to local state
       filenames.forEach((filename) => {
@@ -222,9 +227,13 @@ const FilesList = ({ loading, allFiles, setAllFiles, page, setPage }) => {
       setNewFiles([]);  // ✅ reset new unsaved additions
       setMetadataChanges({});
       setLockChanges({});
+      await fetchFiles()
       alert("✅ All changes saved.");
+      
     }catch(err){
-      console.log(err);
+      alert(err);
+    }finally{
+      setLoading(false);
     }
   };
   
@@ -251,79 +260,67 @@ const FilesList = ({ loading, allFiles, setAllFiles, page, setPage }) => {
 
       <h2 className="text-green-400 text-xl mb-3">📁 Files</h2>
       <LockByUrlInput onAdd={setLockingFile} onFileAdd={addFileToList} />
-
+      
       <div className="bg-gray-800 p-4 w-full h-64 overflow-y-auto space-y-2">
-      {fileEntries.map((details, index) => {
-          const filename = details.name;
-          const pendingMetadata = metadataChanges[filename];
-          const metadata = pendingMetadata || details.metadata || {};
+      { fileEntries.map((details, index) => {
+      const filename = details.name;
+      const pendingMetadata = metadataChanges[filename];
+      const metadata = pendingMetadata || details.metadata || {};
 
-          const pendingLock = lockChanges[filename];
+      const pendingLock = lockChanges[filename];
+      const finalLockState = pendingLock?.temporary_hold ?? details.temporary_hold;
+      const finalExpiry = pendingLock?.hold_expiry ?? details.expiration_date;
+      const now = dayjs().add(30, 'second');
+      const expiryDate = finalExpiry ? dayjs(finalExpiry) : null;
+      const isExpiryValid = expiryDate && expiryDate.isAfter(now);
+      const isLocked = finalLockState === true || isExpiryValid;
+      const lockDuration = isLocked ? calculateLockDuration(finalExpiry) : null;
 
-          const finalLockState =
-            pendingLock?.temporary_hold ?? details.temporary_hold;
+      const isModified =
+        metadataChanges.hasOwnProperty(filename) ||
+        lockChanges.hasOwnProperty(filename);
 
+      return (
+        <div
+          key={index}
+          className={`bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-600 transition flex min-h-[40px] items-center ${isModified ? "border-l-4 border-yellow-400" : ""}`}
+        >
+          <div className="w-[30%] text-left truncate">{filename}</div>
+          <div className="w-[20%] text-xs text-green-400">
+            <div>Project: {metadata.project || "None"}</div>
+            <div>Category: {metadata.category || "None"}</div>
+          </div>
 
-
-          const finalExpiry = pendingLock?.hold_expiry ?? details.expiration_date;
-
-          // Check if expiry is in the future
-          const now = dayjs().add(30, 'second');
-          const expiryDate = finalExpiry ? dayjs(finalExpiry) : null;
-          const isExpiryValid = expiryDate && expiryDate.isAfter(now);
-          
-          // ✅ Only locked if temporary_hold is true or future-dated expiry
-          const isLocked = finalLockState === true || isExpiryValid;
-          
-          const lockDuration = isLocked ? calculateLockDuration(finalExpiry) : null;
-
-          const isModified =
-          metadataChanges.hasOwnProperty(filename) ||
-          lockChanges.hasOwnProperty(filename);
-
-          
-          return (
-            <div
-              key={index}
-              className={`bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-600 transition flex min-h-[40px] items-center ${isModified ? "border-l-4 border-yellow-400" : ""}
-              `}
-            >
-              <div className="w-[30%] text-left truncate">{filename}</div>
-              <div className="w-[20%] text-xs text-green-400">
-                <div>Project: {metadata.project || "None"}</div>
-                <div>Category: {metadata.category || "None"}</div>
-              </div>
-
-              {isLocked ? (
-                <div className="w-[20%] text-left text-yellow-300 text-sm">
-                  🔒 Locked
-                  <div className="text-xs">{lockDuration}</div>
-                </div>
-              ) : (
-                <div className="w-[20%]" />
-              )}
-
-              <div className="w-[30%] flex gap-2">
-                <button
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs py-1 px-2 rounded"
-                  onClick={() => handleEditMetadata(filename)}
-                >
-                  Edit Metadata
-                </button>
-                <button
-                  className={`${
-                    isLocked
-                      ? "bg-red-600 hover:bg-red-500"
-                      : "bg-green-600 hover:bg-green-500"
-                  } text-white text-xs py-1 px-2 rounded`}
-                  onClick={() => handleToggleLock(filename, isLocked)}
-                >
-                  {isLocked ? "Unlock" : "Lock"}
-                </button>
-              </div>
+          {isLocked ? (
+            <div className="w-[20%] text-left text-yellow-300 text-sm">
+              🔒 Locked
+              <div className="text-xs">{lockDuration}</div>
             </div>
-          );
-        })}
+          ) : (
+            <div className="w-[20%]" />
+          )}
+
+          <div className="w-[30%] flex gap-2">
+            <button
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs py-1 px-2 rounded"
+              onClick={() => handleEditMetadata(filename)}
+            >
+              Edit Metadata
+            </button>
+            <button
+              className={`${
+                isLocked
+                  ? "bg-red-600 hover:bg-red-500"
+                  : "bg-green-600 hover:bg-green-500"
+              } text-white text-xs py-1 px-2 rounded`}
+              onClick={() => handleToggleLock(filename, isLocked)}
+            >
+              {isLocked ? "Unlock" : "Lock"}
+            </button>
+          </div>
+        </div>
+      );
+    })}
       </div>
       <Pagination page={page} pages={pages} setPage={setPage} />
 

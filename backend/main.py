@@ -6,8 +6,7 @@ from config import SCOPES, CREDENTIALS_FILE, TOKEN_FILE, BUCKET_NAME
 from pydantic import BaseModel
 from typing import Dict, Optional, List
 from datetime import datetime, timezone, timedelta
-import math
-import json
+
 app = FastAPI()
 
 app.add_middleware(
@@ -19,8 +18,6 @@ app.add_middleware(
 )
 @app.get("/files")
 def get_files(
-    page: int = Query(1, ge=1),
-    limit: int = Query(5, ge=1),
     query: str = ""
 ):
     creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
@@ -29,7 +26,7 @@ def get_files(
     # 🔁 Load locked_objects.json
     try:
         # lock_blob always true
-        lock_blob, _ = get_locked_file_with_generation(bucket)
+        lock_blob, lock_generation = get_locked_file_with_generation(bucket)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading lock file: {str(e)}")
 
@@ -55,6 +52,7 @@ def get_files(
 
     return {
         "files": filtered,
+        "currentGeneration" : lock_generation,
     }
 
 class LockStatus(BaseModel):
@@ -64,72 +62,81 @@ class FileUpdate(BaseModel):
     filename: str
     metadata: Optional[Dict[str, str]] = None
     lockstatus: Optional[LockStatus] = None
+class UpdateBatchPayload(BaseModel):
+    updates: List[FileUpdate]
+    currentGeneration: Optional[str] = None
+
 
 @app.patch("/update-files-batch")
-def update_files_batch(updates: List[FileUpdate] = Body(...)):
+def update_files_batch(new_data: UpdateBatchPayload):
     creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
     gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
     bucket = gcs_client.bucket(BUCKET_NAME)
 
-    # 🔁 Step 1: Load locked_objects.json + its generation
-    locked_map, lockfile_generation = get_locked_file_with_generation(bucket)
-
+    # 🔁 Step 1: Load locked_objects.json
+    latest_blob = bucket.get_blob(f'{BUCKET_NAME}_locked_objects.json')
+    if str(new_data.currentGeneration) != str(latest_blob.generation):
+        raise HTTPException(status_code= 409, detail= "Lock File Json Mismatch. Please refresh the page.")
+    locked_map, _ = get_locked_file_with_generation(bucket)
+    
     # 🧠 Step 2: Update each file individually
-    for update in updates:
+    for update in new_data.updates:
         filename = update.filename
         blob = bucket.blob(filename)
         blob.reload()
-
-        # 🔒 Check generation match
-        existing_lock = locked_map.get(filename)
-        print(blob.name)
-        print(existing_lock)
-        print(blob.generation)
-        if existing_lock and str(blob.generation) != str(existing_lock.get("generation")):
-            
-            try:
-                update_blob_entry_in_locked_json(bucket, blob.name, blob)
-            except Exception as e:
-                print(f"Failed to update stale lock entry for {filename}:", e)
-            raise HTTPException(status_code=409, detail=f"Conflict: {filename} has outdated generation. Please refresh.")
-
-        # 📝 Metadata update
-        if update.metadata:
-            blob.metadata = update.metadata
-            blob.patch()
-
+        now = datetime.now(timezone.utc)
+        retain_until = now + timedelta(seconds=30)
         # 🔐 Lock update
         if update.lockstatus:
             blob.temporary_hold = update.lockstatus.temporary_hold
             blob.patch()
-
             expiry = update.lockstatus.hold_expiry
+            expiry_dt = datetime.fromisoformat(expiry).replace(tzinfo=timezone.utc)
+            
+
+            # Determine retention time
             if expiry:
-                blob.retention.mode = "Unlocked"
-                blob.retention.retain_until_time = datetime.fromisoformat(expiry).replace(tzinfo=timezone.utc)
+                if expiry_dt > now:
+                    retain_until = expiry_dt
+                else:
+                    retain_until = now + timedelta(seconds=30)
             else:
-                blob.retention.mode = "Unlocked"
-                blob.retention.retain_until_time = datetime.now(timezone.utc) + timedelta(seconds=10)
+                retain_until = now + timedelta(seconds=30)
+
+            # Apply retention
+            blob.retention.mode = "Unlocked"
+            blob.retention.retain_until_time = retain_until
 
             blob.patch(override_unlocked_retention=True)
+        # 📝 Metadata update
+        if update.metadata or update.metadata == {}:
+            blob.reload()
+            blob.metadata = update.metadata
+            blob.retention.mode = "Unlocked"
+            blob.retention.retain_until_time = retain_until
+            blob.update(override_unlocked_retention=True)
+            print(f"Update Metadata: {blob.metadata}")
+        # ✅ Update or remove entry in locked_map
+        expiry_time = blob.retention.retain_until_time
+        now_plus_30s = datetime.now(timezone.utc) + timedelta(seconds=30)
+        if blob.temporary_hold or (expiry_time and expiry_time > now_plus_30s):
+            locked_map[filename] = {
+                "temporary_hold": blob.temporary_hold,
+                "expiration_date": expiry_time.isoformat() if expiry_time else None,
+                "metadata": blob.metadata or {},
+                "updated_at": blob.updated.isoformat() if blob.updated else None,
+                "metageneration": blob.metageneration
+            }
+        elif filename in locked_map:
+            del locked_map[filename] 
+            
+  
+    update_locked_file(bucket, locked_map, latest_blob.generation)
 
-        # 🧾 Update locked_map
-        locked_map[filename] = {
-            "temporary_hold": blob.temporary_hold,
-            "expiration_date": blob.retention_expiration_time.isoformat() if blob.retention_expiration_time else None,
-            "metadata": blob.metadata or {},
-            "updated_at": blob.updated.isoformat() if blob.updated else None,
-            "generation": blob.generation
-        }
 
-    # 💾 Step 3: Upload the updated lockfile
-    try:
-        update_locked_file(bucket, locked_map, generation=lockfile_generation)
-    except Exception as e:
-        print("🔴 Error updating locked_objects.json:", e)
-        raise HTTPException(status_code=409, detail="Conflict: Lock file has changed. Please refresh.")
+    return {"message": f"✅ Successfully updated {len(new_data.updates)} files"}
 
-    return {"message": f"✅ Successfully updated {len(updates)} files"}
+
 
 @app.get("/check-object-exists")
 def check_object_exists(filename: str):
