@@ -12,7 +12,7 @@ function App() {
   const [currentLockFileGeneration, setCurrentLockFileGeneration] = useState();
   const [allFiles, setAllFiles] = useState([]); // store full list from backend
   const [page, setPage] = useState(1);
-
+  const [expiredFiles , setExpiredFiles] = useState([]);
 
   const [search, setSearch] = useState("");        // actual query
   const [searchInput, setSearchInput] = useState("");  // controlled input
@@ -42,10 +42,17 @@ function App() {
 
           return !(expiryDate && expiryDate.isBefore(now) && !details.temporary_hold);
         });
+      const expiredAndUnlockedFiles = data.files.filter((details) => {
+        const finalExpiry = details.expiration_date;
+        const expiryDate = finalExpiry ? dayjs(finalExpiry) : null;
+        return expiryDate && expiryDate.isBefore(now) && !details.temporary_hold;
+      });
       console.log("Filtered Files: ");
       console.log(filtered);
+      console.log(expiredAndUnlockedFiles);
       const combined = [...filtered || [], ...(newFiles || [])];
       setCurrentLockFileGeneration(data.currentGeneration);
+      setExpiredFiles(expiredAndUnlockedFiles);
       setAllFiles(combined);
       setPage(1);
     } catch (err) {
@@ -57,6 +64,10 @@ function App() {
   useEffect(() => {
     fetchFiles();
   }, [search]);
+
+  useEffect(() => {
+    console.log("Expired Files", expiredFiles);
+  }, [expiredFiles]);
   
   
   return (
@@ -70,6 +81,7 @@ function App() {
 
       <div className="bg-gray-800 p-4 w-full">
       <FileList
+        expiredFiles = {expiredFiles}
         setLoading={setLoading}
         loading={loading}
         allFiles={allFiles}

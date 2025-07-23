@@ -6,7 +6,7 @@ import Pagination from "./Pagination.jsx";
 import LockByUrlInput from "./LockByUrlInput.jsx";
 import { loadChangesFromSession, saveChangesToSession } from "./utils/sessionUtils.js";
 
-const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, fetchFiles, currentLockFileGeneration}) => {
+const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, fetchFiles, currentLockFileGeneration, expiredFiles}) => {
   const [pages, setPages] = useState(1);
   const [visibleFiles, setVisibleFiles] = useState([]);
 
@@ -87,12 +87,15 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
       }));
     } else if (updateType === "lock") {
       const isIndefinite = update === null;
+      const holdExpiry = isIndefinite
+        ? dayjs().add(10, "second").toISOString()
+        : update;
   
       setLockChanges((prev) => ({
         ...prev,
         [filename]: {
           temporary_hold: isIndefinite,
-          hold_expiry: isIndefinite ? null : update,
+          hold_expiry: holdExpiry,
         },
       }));
     }
@@ -150,9 +153,17 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
   const saveAllChanges = async () => {
     setLoading(true);
     let updatedFiles = [ ...allFiles ];
-  
+    const formattedExpiredFiles = expiredFiles.length > 0 ? (expiredFiles.map((file) => 
+    {return {
+      "filename" : file.name,
+      "metadata" : file.metadata,
+      "lockstatus" : {
+        "temporary_hold" : file.temporary_hold,
+        "hold_expiry" : file.expiration_date
+      }
+    }})) : []
     // Combine metadata + lockChanges into one array
-    const combinedUpdates = [];
+    const combinedUpdates = [...formattedExpiredFiles];
   
     const filenames = new Set([
       ...Object.keys(metadataChanges),
@@ -176,7 +187,7 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
       }
       
       combinedUpdates.push(entry);
-      
+    console.log(combinedUpdates);
     });
     const new_data = {
       "updates" : combinedUpdates,

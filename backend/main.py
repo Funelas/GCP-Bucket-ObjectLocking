@@ -82,7 +82,11 @@ def update_files_batch(new_data: UpdateBatchPayload):
     # 🧠 Step 2: Update each file individually
     for update in new_data.updates:
         filename = update.filename
-        blob = bucket.blob(filename)
+        blob = bucket.get_blob(filename)
+        if not blob:
+            if filename in locked_map:
+                del locked_map[filename] 
+            continue
         blob.reload()
         now = datetime.now(timezone.utc)
         retain_until = now + timedelta(seconds=30)
