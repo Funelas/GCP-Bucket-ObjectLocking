@@ -47,9 +47,6 @@ function App() {
         const expiryDate = finalExpiry ? dayjs(finalExpiry) : null;
         return expiryDate && expiryDate.isBefore(now) && !details.temporary_hold;
       });
-      console.log("Filtered Files: ");
-      console.log(filtered);
-      console.log(expiredAndUnlockedFiles);
       const combined = [...filtered || [], ...(newFiles || [])];
       setCurrentLockFileGeneration(data.currentGeneration);
       setExpiredFiles(expiredAndUnlockedFiles);
@@ -66,8 +63,9 @@ function App() {
   }, [search]);
 
   useEffect(() => {
-    console.log("Expired Files", expiredFiles);
-  }, [expiredFiles]);
+    console.log("All Files", allFiles)
+  }, [allFiles])
+
   
   
   return (

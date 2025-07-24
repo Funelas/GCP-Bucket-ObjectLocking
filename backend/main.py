@@ -153,3 +153,11 @@ def check_object_exists(filename: str):
         return {"exists": True}
     return {"exists": False}
 
+@app.get("/search-objects")
+def search_objects(query : str = ""):
+    creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
+    gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
+    bucket = gcs_client.get_bucket(BUCKET_NAME)
+    if bucket:
+        return [blob.name for blob in bucket.list_blobs(match_glob= f"**{query}**")]
+    return []

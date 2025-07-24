@@ -5,6 +5,7 @@ import ObjectLockModal from "./ObjectLockModal.jsx";
 import Pagination from "./Pagination.jsx";
 import LockByUrlInput from "./LockByUrlInput.jsx";
 import { loadChangesFromSession, saveChangesToSession } from "./utils/sessionUtils.js";
+import LockByIdInput from "./LockByIdInput.jsx";
 
 const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, fetchFiles, currentLockFileGeneration, expiredFiles}) => {
   const [pages, setPages] = useState(1);
@@ -17,6 +18,7 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
   const [lockChanges, setLockChanges] = useState({});
   const [lockingFile, setLockingFile] = useState(null);
   const [newFiles, setNewFiles] = useState([]);
+  const [objectId, setObjectId] = useState(null);
 
   useEffect(() => {
     const total = allFiles.length;
@@ -26,10 +28,7 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
     setVisibleFiles(allFiles.slice(start, end));
   }, [allFiles, page]);
   
-  useEffect(() => {
-    console.log("Loaded metadataChanges:", metadataChanges);
-    console.log("Loaded lockChanges:", lockChanges);
-  }, [metadataChanges, lockChanges]);
+
   // Load from sessionStorage on mount
   useEffect(() => {
     const { metadataChanges, lockChanges, newFiles: savedNewFiles } = loadChangesFromSession();
@@ -46,63 +45,84 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
 
   if (loading) return <p className="text-green-400">Loading...</p>;
   const addFileToList = (filename) => {
-    const alreadyExists = allFiles.some((f) => f.name === filename) || newFiles.some(f => f.name === filename);
-    if (alreadyExists) return;
+    const filenames = Array.isArray(filename) ? filename : [filename];
   
-    const newFile = {
-      name: filename,
+    // Filter out duplicates
+    const newFilesToAdd = filenames.filter((file) => 
+      !allFiles.some((f) => f.name === file) &&
+      !newFiles.some((f) => f.name === file)
+    );
+  
+    if (newFilesToAdd.length === 0) return;
+  
+    const now = new Date().toISOString();
+    const generatedNewFiles = newFilesToAdd.map((file) => ({
+      name: file,
       temporary_hold: false,
       expiration_date: null,
       metadata: {},
-      updated_at: new Date().toISOString(),
-    };
+      updated_at: now,
+    }));
   
-    const combined = [...allFiles, newFile];
-    setAllFiles(combined);
+    const updatedAllFiles = [...allFiles, ...generatedNewFiles];
+    const updatedNewFiles = [...newFiles, ...generatedNewFiles];
   
-    // ✅ Add to newFiles too
-    setNewFiles((prev) => [...prev, newFile]);
+    setAllFiles(updatedAllFiles);
+    setNewFiles(updatedNewFiles);
   
-    const newTotal = combined.length;
+    const newTotal = updatedAllFiles.length;
     const newLastPage = Math.ceil(newTotal / pageSize);
     setPage(newLastPage);
+  
+    console.log("Added files:", newFilesToAdd);
   };
+  
   
   
   const handleEditMetadata = (filename) => {
     const existing = metadataChanges[filename];
     const fileObject = allFiles.find((f) => f.name === filename);
-    console.log("File Object");
-    console.log(fileObject);
     const original = fileObject?.metadata || {};
     setEditingFile(filename);
     setEditingMetadata(existing || original);
   };
 
   const closeModal = (filename, update = null, updateType = null) => {
+    const filenames = Array.isArray(filename) ? filename : [filename];
     if (updateType === "metadata" && update) {
-      setMetadataChanges((prev) => ({
-        ...prev,
-        [filename]: update,
-      }));
+      filenames.forEach((file) => {
+        setMetadataChanges((prev) => ({
+          ...prev,
+          [file]: update,
+        }));
+      })
+      
     } else if (updateType === "lock") {
-      const isIndefinite = update === null;
-      const holdExpiry = isIndefinite
-        ? dayjs().add(10, "second").toISOString()
-        : update;
-  
-      setLockChanges((prev) => ({
-        ...prev,
-        [filename]: {
-          temporary_hold: isIndefinite,
-          hold_expiry: holdExpiry,
-        },
-      }));
+      filenames.forEach((file) => {
+        const isIndefinite = update === null;
+        const holdExpiry = isIndefinite
+          ? dayjs().add(10, "second").toISOString()
+          : update;
+    
+        setLockChanges((prev) => ({
+          ...prev,
+          [file]: {
+            temporary_hold: isIndefinite,
+            hold_expiry: holdExpiry,
+          },
+        }));
+      })
+      
     }
-  
-    setEditingFile(null);
+    if (filenames.length > 1 && updateType === "lock"){
+      setEditingFile(filenames)
+    } else{
+      setEditingFile(null);
+      setObjectId(null)
+    }
     setEditingMetadata(null);
     setLockingFile(null);
+    
   };
   
 
@@ -180,14 +200,13 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
         const { temporary_hold, hold_expiry } = lockChanges[filename];
         const entryLock = { temporary_hold };
         if (hold_expiry) {
-          console.log("It goes in hold expiry process");
+
           entryLock.hold_expiry = hold_expiry;  // 🔥 Include inside lockstatus
         }
         entry.lockstatus = entryLock;  // ✅ assign final object with retention_days
       }
       
       combinedUpdates.push(entry);
-    console.log(combinedUpdates);
     });
     const new_data = {
       "updates" : combinedUpdates,
@@ -263,13 +282,15 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
           filename={editingFile}
           metadata={editingMetadata}
           onClose={closeModal}
+          objectId = {objectId}
         />
       )}
       {lockingFile && (
-        <ObjectLockModal filename={lockingFile} onClose={closeModal} />
+        <ObjectLockModal filename={lockingFile} onClose={closeModal} objectId= {objectId}/>
       )}
 
       <h2 className="text-green-400 text-xl mb-3">📁 Files</h2>
+      <LockByIdInput onAddMultiple={setLockingFile} onFileAddMultiple = {addFileToList} setObjectId={setObjectId}/>
       <LockByUrlInput onAdd={setLockingFile} onFileAdd={addFileToList} />
       
       <div className="bg-gray-800 p-4 w-full h-64 overflow-y-auto space-y-2">

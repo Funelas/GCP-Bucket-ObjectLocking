@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-const MetadataModal = ({ filename, metadata, onClose }) => {
+const MetadataModal = ({ filename, metadata, onClose, objectId}) => {
   const initialRows = Object.entries(metadata || {});
   const [rows, setRows] = useState([...initialRows, ["", ""]]);
 
@@ -27,7 +27,6 @@ const MetadataModal = ({ filename, metadata, onClose }) => {
       }
     });
   
-    console.log("📂 Final Metadata:", metadataObj);
     onClose(filename, metadataObj, "metadata"); // 👈 Explicitly pass the update type
   };
   
@@ -36,7 +35,7 @@ const MetadataModal = ({ filename, metadata, onClose }) => {
     <div className="fixed inset-0 backdrop-blur-lg flex items-center justify-center z-50 transition-opacity duration-1000 ease-in-out">
       <div className="bg-gray-900 text-white rounded-lg p-6 w-[500px] max-w-full shadow-lg relative">
         <h2 className="text-lg font-semibold mb-4">
-          📝 Edit Metadata: <span className="text-green-400">{filename}</span>
+          📝 Edit Metadata: <span className="text-green-400">{objectId ?? filename}</span>
         </h2>
 
         {/* Headers */}
