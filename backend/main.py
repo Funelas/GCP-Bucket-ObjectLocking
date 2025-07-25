@@ -6,7 +6,9 @@ from config import SCOPES, CREDENTIALS_FILE, TOKEN_FILE, BUCKET_NAME
 from pydantic import BaseModel
 from typing import Dict, Optional, List
 from datetime import datetime, timezone, timedelta
-
+import os
+from dotenv import load_dotenv
+load_dotenv()
 app = FastAPI()
 
 app.add_middleware(
@@ -18,17 +20,23 @@ app.add_middleware(
 )
 @app.get("/files")
 def get_files(
-    query: str = ""
+    query: str = "",
+    bucket: str = "",
 ):
-    creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
-    gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
-    bucket = gcs_client.bucket(BUCKET_NAME)
-    # 🔁 Load locked_objects.json
+    
     try:
         # lock_blob always true
+        creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
+        gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
+        bucket_name = bucket
+        bucket = gcs_client.bucket(bucket_name)
         lock_blob, lock_generation = get_locked_file_with_generation(bucket)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading lock file: {str(e)}")
+    except:
+        print("Goes Here")
+        return {
+        "files": [],
+        "currentGeneration" : 0,
+    }
 
     # 🔍 Apply filtering based on filename or metadata
     query = query.lower()
@@ -68,13 +76,14 @@ class UpdateBatchPayload(BaseModel):
 
 
 @app.patch("/update-files-batch")
-def update_files_batch(new_data: UpdateBatchPayload):
+def update_files_batch(new_data: UpdateBatchPayload, bucket: str = ""):
     creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
     gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
-    bucket = gcs_client.bucket(BUCKET_NAME)
+    bucket_name = bucket
+    bucket = gcs_client.bucket(bucket_name)
 
     # 🔁 Step 1: Load locked_objects.json
-    latest_blob = bucket.get_blob(f'{BUCKET_NAME}_locked_objects.json')
+    latest_blob = bucket.get_blob(f'{bucket_name}_locked_objects.json')
     if str(new_data.currentGeneration) != str(latest_blob.generation):
         raise HTTPException(status_code= 409, detail= "Lock File Json Mismatch. Please refresh the page.")
     locked_map, _ = get_locked_file_with_generation(bucket)
@@ -143,10 +152,11 @@ def update_files_batch(new_data: UpdateBatchPayload):
 
 
 @app.get("/check-object-exists")
-def check_object_exists(filename: str):
+def check_object_exists(filename: str, bucket: str = ""):
     creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
     gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
-    bucket = gcs_client.bucket(BUCKET_NAME)
+    bucket_name = bucket
+    bucket = gcs_client.bucket(bucket_name)
     blob = bucket.get_blob(filename)
     
     if blob:
@@ -154,10 +164,28 @@ def check_object_exists(filename: str):
     return {"exists": False}
 
 @app.get("/search-objects")
-def search_objects(query : str = ""):
-    creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
-    gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
-    bucket = gcs_client.get_bucket(BUCKET_NAME)
-    if bucket:
-        return [blob.name for blob in bucket.list_blobs(match_glob= f"**{query}**")]
-    return []
+def search_objects(query : str = "", bucket: str = ""):
+    try:
+        bucket_name = bucket
+        creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
+        gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
+        bucket = gcs_client.get_bucket(bucket_name)
+        if bucket:
+            return [blob.name for blob in bucket.list_blobs(match_glob= f"**{query}**")]
+        return []
+    except:
+        return []
+
+@app.get("/get-buckets")
+def get_buckets():
+    # If given credentials are for the whole project
+    # project_id = "projectidstring"
+    # creds = get_credentials(TOKEN_FILE = TOKEN_FILE, CREDENTIALS_FILE= CREDENTIALS_FILE, SCOPES= SCOPES)
+    # client = storage.Client(project=project_id, credentials= creds)
+    # buckets = client.list_buckets()
+
+    # bucket_names = [bucket.name for bucket in buckets]
+    # return {"buckets": bucket_names}
+    bucket_names = [os.getenv(f"BUCKET{i}")for i in range(1,6)]
+    print(bucket_names)
+    return bucket_names 

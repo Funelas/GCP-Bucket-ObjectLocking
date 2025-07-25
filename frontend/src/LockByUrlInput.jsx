@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import ObjectLockModal from "./ObjectLockModal.jsx";
-const LockByUrlInput = ({ onAdd, onFileAdd }) => {
+const LockByUrlInput = ({ onAdd, onFileAdd, bucketName }) => {
     const [url, setUrl] = useState("");
     const [filename, setFilename] = useState(null);
   
@@ -27,7 +27,7 @@ const LockByUrlInput = ({ onAdd, onFileAdd }) => {
     
       // Check with backend if blob exists
       try {
-        const res = await fetch(`http://localhost:8000/check-object-exists?filename=${encodeURIComponent(extracted)}`);
+        const res = await fetch(`http://localhost:8000/check-object-exists?filename=${encodeURIComponent(extracted)}&bucket=${bucketName}`);
         const data = await res.json();
     
         if (!data.exists) {

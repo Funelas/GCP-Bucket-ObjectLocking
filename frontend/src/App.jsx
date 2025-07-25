@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import Header from "./Header.jsx";
 import FileList from "./FilesList.jsx";
 import LoadingOverlay from "./LoadingOverlay.jsx";
-import { loadChangesFromSession, saveChangesToSession } from "./utils/sessionUtils.js";
+import { loadChangesFromSession} from "./utils/sessionUtils.js";
+import BucketSelector from "./BucketSelector.jsx";
 import dayjs from "dayjs";
 function App() {
 
@@ -16,7 +17,8 @@ function App() {
 
   const [search, setSearch] = useState("");        // actual query
   const [searchInput, setSearchInput] = useState("");  // controlled input
-
+  const [bucketName, setBucketName] = useState("tempbucket24");
+  const [buckets, setBuckets] = useState([]);
   const handleSearchSubmit = () => {
     setPage(1);             // reset to page 1 for new search
     setSearch(searchInput); // apply input as actual search
@@ -26,11 +28,12 @@ function App() {
     try {
       const url = new URL("http://localhost:8000/files");
       if (search) url.searchParams.append("query", search);
+      url.searchParams.append("bucket", bucketName);
 
       const res = await fetch(url);
       const data = await res.json();
       // ✅ Re-merge unsaved new files (after loading them from session!)
-      const { newFiles } = loadChangesFromSession();
+      const { newFiles} = loadChangesFromSession(bucketName);
       
       const now = dayjs().add(30, 'second');
 
@@ -47,7 +50,13 @@ function App() {
         const expiryDate = finalExpiry ? dayjs(finalExpiry) : null;
         return expiryDate && expiryDate.isBefore(now) && !details.temporary_hold;
       });
-      const combined = [...filtered || [], ...(newFiles || [])];
+      // ✅ Filter newFiles to only include those not in filtered
+      const filteredFilenames = new Set(filtered.map((file) => file.name));
+      const uniqueNewFiles = (newFiles || []).filter(
+        (file) => !filteredFilenames.has(file.name)
+      );
+      const combined = [...filtered || [], ...(uniqueNewFiles || [])];
+      console.log("Combined: ", combined);
       setCurrentLockFileGeneration(data.currentGeneration);
       setExpiredFiles(expiredAndUnlockedFiles);
       setAllFiles(combined);
@@ -58,13 +67,27 @@ function App() {
       setLoading(false);
     }
   };
+  
   useEffect(() => {
-    fetchFiles();
-  }, [search]);
+    const fetchBuckets = async () => {
+      setLoading(true);
+      try{
+        const url = new URL("http://localhost:8000/get-buckets")
+        const res = await fetch(url);
+        const data = await res.json();
+        console.log(data);
+        setBuckets(data);
+      } finally{
+        setLoading(false)
+      }
+    };
+    fetchBuckets()
+  }, [])
 
   useEffect(() => {
-    console.log("All Files", allFiles)
-  }, [allFiles])
+    fetchFiles();
+  }, [search, bucketName]);
+
 
   
   
@@ -78,6 +101,7 @@ function App() {
       />
 
       <div className="bg-gray-800 p-4 w-full">
+      <BucketSelector buckets= {buckets} selectedBucket={bucketName} onSelect={setBucketName} />
       <FileList
         expiredFiles = {expiredFiles}
         setLoading={setLoading}
@@ -88,6 +112,8 @@ function App() {
         setPage={setPage}
         fetchFiles = {fetchFiles}
         currentLockFileGeneration = {currentLockFileGeneration}
+        bucketName = {bucketName}
+        buckets = {buckets}
       />
 
       </div>

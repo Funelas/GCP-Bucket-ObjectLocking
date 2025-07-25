@@ -7,7 +7,7 @@ import LockByUrlInput from "./LockByUrlInput.jsx";
 import { loadChangesFromSession, saveChangesToSession } from "./utils/sessionUtils.js";
 import LockByIdInput from "./LockByIdInput.jsx";
 
-const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, fetchFiles, currentLockFileGeneration, expiredFiles}) => {
+const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, fetchFiles, currentLockFileGeneration, expiredFiles, bucketName, buckets}) => {
   const [pages, setPages] = useState(1);
   const [visibleFiles, setVisibleFiles] = useState([]);
 
@@ -19,7 +19,7 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
   const [lockingFile, setLockingFile] = useState(null);
   const [newFiles, setNewFiles] = useState([]);
   const [objectId, setObjectId] = useState(null);
-
+  const [bucketChanges, setBucketChanges] = useState([]);
   useEffect(() => {
     const total = allFiles.length;
     setPages(Math.ceil(total / pageSize));
@@ -31,51 +31,78 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
 
   // Load from sessionStorage on mount
   useEffect(() => {
-    const { metadataChanges, lockChanges, newFiles: savedNewFiles } = loadChangesFromSession();
+    const { metadataChanges, lockChanges, newFiles: savedNewFiles } = loadChangesFromSession(bucketName);
     setMetadataChanges(metadataChanges);
     setLockChanges(lockChanges);
     setNewFiles(savedNewFiles); // ✅ load new files too
 
   }, []);
-
-  // Save to sessionStorage when either changes
+  const getAllChangedBucketNames = () => {
+    const bucketNames = new Set();
+  
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      const match = key.match(/^(metadataChanges|lockChanges|newFiles|expiredFiles)-(.+)$/);
+      if (match) {
+        const bucketName = match[2];
+        bucketNames.add(bucketName);
+      }
+    }
+  
+    return Array.from(bucketNames);
+  };
+  // Save to sessionStorage when either changes, Saving to session
   useEffect(() => {
-    saveChangesToSession(metadataChanges, lockChanges, newFiles);
+    saveChangesToSession(bucketName, metadataChanges, lockChanges, newFiles, expiredFiles);
+    console.log("Metadata Changes: ", metadataChanges);
+    console.log("Lock Changes", lockChanges);
+    console.log("New Files: ", newFiles);
   }, [metadataChanges, lockChanges, newFiles]);
 
   if (loading) return <p className="text-green-400">Loading...</p>;
+  
   const addFileToList = (filename) => {
-    const filenames = Array.isArray(filename) ? filename : [filename];
+    const newFilesToAdd = typeof filename === "string" ? { [bucketName]: [filename] } : filename;
   
-    // Filter out duplicates
-    const newFilesToAdd = filenames.filter((file) => 
-      !allFiles.some((f) => f.name === file) &&
-      !newFiles.some((f) => f.name === file)
-    );
+    for (const [bucket, files] of Object.entries(newFilesToAdd)) {
+      if (!files || files.length === 0) continue;
   
-    if (newFilesToAdd.length === 0) return;
+      const now = new Date().toISOString();
+      const generatedNewFiles = files.map((file) => ({
+        name: file,
+        temporary_hold: false,
+        expiration_date: null,
+        metadata: {},
+        updated_at: now,
+      }));
   
-    const now = new Date().toISOString();
-    const generatedNewFiles = newFilesToAdd.map((file) => ({
-      name: file,
-      temporary_hold: false,
-      expiration_date: null,
-      metadata: {},
-      updated_at: now,
-    }));
+      if (bucket === bucketName) {
+        const updatedAllFiles = [...allFiles, ...generatedNewFiles];
+        const updatedNewFiles = [...newFiles, ...generatedNewFiles];
   
-    const updatedAllFiles = [...allFiles, ...generatedNewFiles];
-    const updatedNewFiles = [...newFiles, ...generatedNewFiles];
+        setAllFiles(updatedAllFiles);
+        setNewFiles(updatedNewFiles);
   
-    setAllFiles(updatedAllFiles);
-    setNewFiles(updatedNewFiles);
+        const newTotal = updatedAllFiles.length;
+        const newLastPage = Math.ceil(newTotal / pageSize);
+        setPage(newLastPage);
   
-    const newTotal = updatedAllFiles.length;
-    const newLastPage = Math.ceil(newTotal / pageSize);
-    setPage(newLastPage);
+        // Also save to session
+        saveChangesToSession(bucket, metadataChanges, lockChanges, updatedNewFiles,expiredFiles);
+      } else {
+        const {
+          metadataChanges: sessionMetadataChanges,
+          lockChanges: sessionLockChanges,
+          newFiles: sessionNewFiles,
+        } = loadChangesFromSession(bucket);
   
-    console.log("Added files:", newFilesToAdd);
+        const updatedNewFiles = [...sessionNewFiles, ...generatedNewFiles];
+  
+        saveChangesToSession(bucket, sessionMetadataChanges, sessionLockChanges, updatedNewFiles, expiredFiles);
+      }
+    }
   };
+  
   
   
   
@@ -88,41 +115,75 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
   };
 
   const closeModal = (filename, update = null, updateType = null) => {
-    const filenames = Array.isArray(filename) ? filename : [filename];
-    if (updateType === "metadata" && update) {
-      filenames.forEach((file) => {
-        setMetadataChanges((prev) => ({
-          ...prev,
-          [file]: update,
-        }));
-      })
-      
-    } else if (updateType === "lock") {
-      filenames.forEach((file) => {
+    const filenames = typeof filename === "string" ? { [bucketName]: [filename] } : filename;
+  
+    for (const [bucket, files] of Object.entries(filenames)) {
+      if (updateType === "metadata" && update) {
+        if (bucket === bucketName) {
+          files.forEach((file) => {
+            setMetadataChanges((prev) => ({
+              ...prev,
+              [file]: update,
+            }));
+          });
+        } else {
+          const {
+            metadataChanges: sessionMetadataChanges,
+            lockChanges: sessionLockChanges,
+            newFiles: sessionNewFiles,
+          } = loadChangesFromSession(bucket);
+  
+          files.forEach((file) => {
+            sessionMetadataChanges[file] = update;
+          });
+  
+          saveChangesToSession(bucket, sessionMetadataChanges, sessionLockChanges, sessionNewFiles, expiredFiles);
+        }
+  
+      } else if (updateType === "lock") {
         const isIndefinite = update === null;
         const holdExpiry = isIndefinite
           ? dayjs().add(10, "second").toISOString()
           : update;
-    
-        setLockChanges((prev) => ({
-          ...prev,
-          [file]: {
-            temporary_hold: isIndefinite,
-            hold_expiry: holdExpiry,
-          },
-        }));
-      })
-      
+  
+        if (bucket === bucketName) {
+          files.forEach((file) => {
+            setLockChanges((prev) => ({
+              ...prev,
+              [file]: {
+                temporary_hold: isIndefinite,
+                hold_expiry: holdExpiry,
+              },
+            }));
+          });
+        } else {
+          const {
+            metadataChanges: sessionMetadataChanges,
+            lockChanges: sessionLockChanges,
+            newFiles: sessionNewFiles,
+          } = loadChangesFromSession(bucket);
+  
+          files.forEach((file) => {
+            sessionLockChanges[file] = {
+              temporary_hold: isIndefinite,
+              hold_expiry: holdExpiry,
+            };
+          });
+  
+          saveChangesToSession(bucket, sessionMetadataChanges, sessionLockChanges, sessionNewFiles, expiredFiles);
+        }
+      }
     }
-    if (filenames.length > 1 && updateType === "lock"){
-      setEditingFile(filenames)
-    } else{
+  
+    if (typeof filename === "object" && updateType === "lock") {
+      setEditingFile(filenames);
+    } else {
       setEditingFile(null);
-      setObjectId(null)
+      setObjectId(null);
     }
+    setBucketChanges(getAllChangedBucketNames());
     setEditingMetadata(null);
     setLockingFile(null);
-    
   };
   
 
@@ -169,111 +230,120 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
   };
   
   
-
+  
+  
   const saveAllChanges = async () => {
     setLoading(true);
-    let updatedFiles = [ ...allFiles ];
-    const formattedExpiredFiles = expiredFiles.length > 0 ? (expiredFiles.map((file) => 
-    {return {
-      "filename" : file.name,
-      "metadata" : file.metadata,
-      "lockstatus" : {
-        "temporary_hold" : file.temporary_hold,
-        "hold_expiry" : file.expiration_date
-      }
-    }})) : []
-    // Combine metadata + lockChanges into one array
-    const combinedUpdates = [...formattedExpiredFiles];
-  
-    const filenames = new Set([
-      ...Object.keys(metadataChanges),
-      ...Object.keys(lockChanges),
-    ]);
-    
-    filenames.forEach((filename) => {
-      const entry = { filename };
-      if (metadataChanges[filename]) {
-        entry.metadata = metadataChanges[filename];
-      }
-      if (lockChanges[filename]) {
-        
-        const { temporary_hold, hold_expiry } = lockChanges[filename];
-        const entryLock = { temporary_hold };
-        if (hold_expiry) {
-
-          entryLock.hold_expiry = hold_expiry;  // 🔥 Include inside lockstatus
-        }
-        entry.lockstatus = entryLock;  // ✅ assign final object with retention_days
-      }
+    // let updatedFiles = [ ...allFiles ];
+    // const allChangedBuckets = getAllChangedBucketNames();
+    // console.log("All Changed Buckets: ", allChangedBuckets);
+    for (const bucket of bucketChanges){
+      const {metadataChanges : sessionMetadataChanges,
+            lockChanges : sessionLockChanges,
+            newFiles : sessionNewFiles,
+            expiredFiles : sessionExpiredFiles
+      } = loadChangesFromSession(bucketName);
+      const formattedExpiredFiles = sessionExpiredFiles.length > 0 ? (sessionExpiredFiles.map((file) => 
+        {return {
+          "filename" : file.name,
+          "metadata" : file.metadata,
+          "lockstatus" : {
+            "temporary_hold" : file.temporary_hold,
+            "hold_expiry" : file.expiration_date
+          }
+        }})) : []
+        // Combine metadata + lockChanges into one array
+        const combinedUpdates = [...formattedExpiredFiles];
       
-      combinedUpdates.push(entry);
-    });
-    const new_data = {
-      "updates" : combinedUpdates,
-      "currentGeneration" : String(currentLockFileGeneration)
+        const filenames = new Set([
+          ...Object.keys(sessionMetadataChanges),
+          ...Object.keys(sessionLockChanges),
+        ]);
+        
+        filenames.forEach((filename) => {
+          const entry = { filename };
+          if (sessionMetadataChanges[filename]) {
+            entry.metadata = sessionMetadataChanges[filename];
+          }
+          if (sessionLockChanges[filename]) {
+            
+            const { temporary_hold, hold_expiry } = sessionLockChanges[filename];
+            const entryLock = { temporary_hold };
+            if (hold_expiry) {
+    
+              entryLock.hold_expiry = hold_expiry;  // 🔥 Include inside lockstatus
+            }
+            entry.lockstatus = entryLock;  // ✅ assign final object with retention_days
+          }
+          
+          combinedUpdates.push(entry);
+        });
+        const new_data = {
+          "updates" : combinedUpdates,
+          "currentGeneration" : String(currentLockFileGeneration)
+        }
+        try {
+          const response = await fetch(`http://localhost:8000/update-files-batch?bucket=${bucket}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(new_data),
+          });
+      
+          if (!response.ok) throw new Error("Lock File Generation Mismatch. Please refresh webpage.");
+      }catch(err){
+        alert(err);
+      }finally{
+        setNewFiles([]);  // ✅ reset new unsaved additions
+        setMetadataChanges({});
+        setLockChanges({});
+        await fetchFiles()
+        alert("✅ All changes saved.");
+        setLoading(false);
+      }
+    };
     }
-    try {
-      const response = await fetch("http://localhost:8000/update-files-batch", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(new_data),
-      });
-  
-      if (!response.ok) throw new Error("Lock File Generation Mismatch. Please refresh webpage.");
+    
   
       // Apply metadataChanges to local state
-      filenames.forEach((filename) => {
-        const fileIndex = updatedFiles.findIndex((f) => f.name === filename);
-        if (fileIndex !== -1) {
-          if (metadataChanges[filename]) {
-            updatedFiles[fileIndex].metadata = metadataChanges[filename];
-          }
-          if (lockChanges[filename]) {
-            const { temporary_hold, hold_expiry } = lockChanges[filename];
-            updatedFiles[fileIndex].temporary_hold = temporary_hold;
+      // filenames.forEach((filename) => {
+      //   const fileIndex = updatedFiles.findIndex((f) => f.name === filename);
+      //   if (fileIndex !== -1) {
+      //     if (metadataChanges[filename]) {
+      //       updatedFiles[fileIndex].metadata = metadataChanges[filename];
+      //     }
+      //     if (lockChanges[filename]) {
+      //       const { temporary_hold, hold_expiry } = lockChanges[filename];
+      //       updatedFiles[fileIndex].temporary_hold = temporary_hold;
           
-            // ✅ Clear expiration properly on unlock
-            if (temporary_hold === false && !hold_expiry) {
-              updatedFiles[fileIndex].expiration_date = null;
-            } else {
-              updatedFiles[fileIndex].expiration_date = hold_expiry;
-            }
+      //       // ✅ Clear expiration properly on unlock
+      //       if (temporary_hold === false && !hold_expiry) {
+      //         updatedFiles[fileIndex].expiration_date = null;
+      //       } else {
+      //         updatedFiles[fileIndex].expiration_date = hold_expiry;
+      //       }
 
-            if (
-              lockChanges[filename].temporary_hold === false &&
-              lockChanges[filename].hold_expiry === null
-            ) {
-              updatedFiles[fileIndex].expiration_date = null;
-            }
-          }
+      //       if (
+      //         lockChanges[filename].temporary_hold === false &&
+      //         lockChanges[filename].hold_expiry === null
+      //       ) {
+      //         updatedFiles[fileIndex].expiration_date = null;
+      //       }
+      //     }
           
         
-        }
-      });
+      //   }
+      // });
   
-      setAllFiles(updatedFiles);
-      setNewFiles([]);  // ✅ reset new unsaved additions
-      setMetadataChanges({});
-      setLockChanges({});
-      await fetchFiles()
-      alert("✅ All changes saved.");
+      // setAllFiles(updatedFiles);
       
-    }catch(err){
-      alert(err);
-    }finally{
-      setLoading(false);
-    }
-  };
+      
+    
   
   
   if (!Array.isArray(allFiles)) return <p className="text-green-400">Loading files...</p>;
   const fileEntries = visibleFiles;
-
-
-  if (fileEntries.length === 0)
-    return <p className="text-green-400">No files found.</p>;
 
   return (
     <>
@@ -290,11 +360,14 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
       )}
 
       <h2 className="text-green-400 text-xl mb-3">📁 Files</h2>
-      <LockByIdInput onAddMultiple={setLockingFile} onFileAddMultiple = {addFileToList} setObjectId={setObjectId}/>
-      <LockByUrlInput onAdd={setLockingFile} onFileAdd={addFileToList} />
+      <LockByIdInput onAddMultiple={setLockingFile} onFileAddMultiple = {addFileToList} setObjectId={setObjectId} availableBuckets={buckets}/>
+      <LockByUrlInput onAdd={setLockingFile} onFileAdd={addFileToList} bucketName={bucketName}/>
       
       <div className="bg-gray-800 p-4 w-full h-64 overflow-y-auto space-y-2">
-      { fileEntries.map((details, index) => {
+
+      { fileEntries.length === 0 ? (
+      <p className="text-green-400">🪹 No files in this bucket are currently locked.</p>) : 
+      fileEntries.map((details, index) => {
       const filename = details.name;
       const pendingMetadata = metadataChanges[filename];
       const metadata = pendingMetadata || details.metadata || {};
@@ -357,8 +430,7 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
       <Pagination page={page} pages={pages} setPage={setPage} />
 
 
-      {(Object.keys(metadataChanges).length > 0 ||
-        Object.keys(lockChanges).length > 0) && (
+      {bucketChanges.length > 0 && (
         <button
           className="mt-4 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded"
           onClick={saveAllChanges}

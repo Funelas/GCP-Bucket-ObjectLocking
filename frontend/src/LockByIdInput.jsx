@@ -1,9 +1,21 @@
 import React, { useState } from "react";
 
-const LockByIdInput = ({ onAddMultiple, onFileAddMultiple, setObjectId }) => {
+const LockByIdInput = ({ onAddMultiple, onFileAddMultiple, setObjectId, availableBuckets = [] }) => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [showBucketDropdown, setShowBucketDropdown] = useState(false);
+  const [selectedBuckets, setSelectedBuckets] = useState([]);
+
+  const toggleBucketDropdown = () => {
+    setShowBucketDropdown((prev) => !prev);
+  };
+
+  const handleBucketToggle = (bucket) => {
+    setSelectedBuckets((prev) =>
+      prev.includes(bucket) ? prev.filter((b) => b !== bucket) : [...prev, bucket]
+    );
+  };
 
   const handleSearch = async () => {
     if (!query.trim()) {
@@ -11,13 +23,25 @@ const LockByIdInput = ({ onAddMultiple, onFileAddMultiple, setObjectId }) => {
       return;
     }
 
+    if (selectedBuckets.length === 0) {
+      alert("Please select at least one bucket.");
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/search-objects?query=${encodeURIComponent(query)}`);
-      const data = await res.json();
-      console.log("Data: ", data);
-      if (Array.isArray(data) && data.length > 0) {
-        setResults(data);
+      let allResults = {};
+
+      for (const bucket of selectedBuckets) {
+        const res = await fetch(`http://localhost:8000/search-objects?query=${encodeURIComponent(query)}&bucket=${bucket}`);
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          allResults[bucket] = data;
+        }
+      }
+
+      if (allResults.length > 0) {
+        setResults(allResults);
       } else {
         alert("No matching objects found.");
         setResults([]);
@@ -31,7 +55,7 @@ const LockByIdInput = ({ onAddMultiple, onFileAddMultiple, setObjectId }) => {
 
   const handleAddAll = () => {
     if (results.length === 0) return;
-    onAddMultiple(results); // Pass to parent
+    onAddMultiple(results);
     onFileAddMultiple(results);
     setQuery("");
     setResults([]);
@@ -40,6 +64,30 @@ const LockByIdInput = ({ onAddMultiple, onFileAddMultiple, setObjectId }) => {
 
   return (
     <div className="mb-4">
+      <div className="mb-2">
+        <button
+          onClick={toggleBucketDropdown}
+          className="text-green-400 underline text-sm mb-1"
+        >
+          {showBucketDropdown ? "Hide Buckets ▲" : "Show Buckets ▼"}
+        </button>
+        {showBucketDropdown && (
+          <div className="bg-gray-800 p-3 rounded mt-1 max-h-40 overflow-y-auto text-sm text-white border border-gray-600">
+            {availableBuckets.map((bucket) => (
+              <label key={bucket} className="flex items-center space-x-2 mb-1">
+                <input
+                  type="checkbox"
+                  checked={selectedBuckets.includes(bucket)}
+                  onChange={() => handleBucketToggle(bucket)}
+                  className="accent-green-400"
+                />
+                <span>{bucket}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center gap-2 mb-2">
         <input
           type="text"

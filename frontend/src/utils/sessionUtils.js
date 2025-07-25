@@ -1,22 +1,16 @@
-const METADATA_KEY = "metadataChanges";
-const LOCK_KEY = "lockChanges";
-const NEW_FILES_KEY = "newFiles"; // ✅
-
-export function saveChangesToSession(metadataChanges, lockChanges, newFiles) {
-  sessionStorage.setItem(METADATA_KEY, JSON.stringify(metadataChanges));
-  sessionStorage.setItem(LOCK_KEY, JSON.stringify(lockChanges));
-  sessionStorage.setItem(NEW_FILES_KEY, JSON.stringify(newFiles || [])); // ✅ optional chaining
+export function saveChangesToSession(bucketName, metadataChanges, lockChanges, newFiles, expiredFiles) {
+  sessionStorage.setItem(`metadataChanges-${bucketName}`, JSON.stringify(metadataChanges));
+  sessionStorage.setItem(`lockChanges-${bucketName}`, JSON.stringify(lockChanges));
+  sessionStorage.setItem(`newFiles-${bucketName}`, JSON.stringify(newFiles || []));
+  sessionStorage.setItem(`expiredFiles-${bucketName}`, JSON.stringify(expiredFiles || []))
 }
 
-export function loadChangesFromSession() {
-  const metadata = JSON.parse(sessionStorage.getItem(METADATA_KEY) || "{}");
-  const lock = JSON.parse(sessionStorage.getItem(LOCK_KEY) || "{}");
-  const newFiles = JSON.parse(sessionStorage.getItem(NEW_FILES_KEY) || "[]"); // ✅
-  return { metadataChanges: metadata, lockChanges: lock, newFiles };
+export function loadChangesFromSession(bucketName) {
+  const metadata = JSON.parse(sessionStorage.getItem(`metadataChanges-${bucketName}`) || "{}");
+  const lock = JSON.parse(sessionStorage.getItem(`lockChanges-${bucketName}`) || "{}");
+  const newFiles = JSON.parse(sessionStorage.getItem(`newFiles-${bucketName}`) || "[]");
+  const expiredFiles = JSON.parse(sessionStorage.getItem(`expiredFiles-${bucketName}`) || "[]")
+  return { metadataChanges: metadata, lockChanges: lock, newFiles, expiredFiles };
 }
 
-export function clearSession() {
-  sessionStorage.removeItem(METADATA_KEY);
-  sessionStorage.removeItem(LOCK_KEY);
-  sessionStorage.removeItem(NEW_FILES_KEY); // ✅
-}
+

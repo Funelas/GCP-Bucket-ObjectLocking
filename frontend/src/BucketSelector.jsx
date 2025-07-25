@@ -1,25 +1,27 @@
 import React from "react";
 
-const BucketSelector = ({ selectedBuckets, availableBuckets, toggleBucket}) => (
-  <div className="mb-4 flex space-x-2 items-center">
-    <label className="text-slate-400 text-sm">Select Bucket:</label>
-    <select
-    multiple
-    value={selectedBuckets}
-    onChange={(e) => {
-        const selected = Array.from(e.target.selectedOptions).map(opt => opt.value);
-        selected.forEach(bucket => toggleBucket(bucket));
-    }}
-    className="bg-slate-700 text-white px-3 py-2 rounded-lg"
-    >
-    {availableBuckets.map((bucket, idx) => (
-        <option key={idx} value={bucket}>
-        {bucket}
-        </option>
-    ))}
-    </select>
-
-  </div>
-);
+const BucketSelector = ({ buckets, selectedBucket, onSelect }) => {
+  console.log("Buckets: ", buckets)
+  return (
+    <div className="p-4 bg-gray-800 text-green-400 rounded-xl shadow-lg">
+      <h2 className="text-xl mb-2 font-semibold">Select a Bucket</h2>
+      <div className="flex flex-col gap-2">
+        {buckets.map((bucket) => (
+          <label key={bucket} className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="bucket"
+              value={bucket}
+              checked={selectedBucket === bucket}
+              onChange={() => onSelect(bucket)}
+              className="accent-green-400"
+            />
+            <span>{bucket}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 export default BucketSelector;
