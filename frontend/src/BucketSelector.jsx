@@ -1,7 +1,6 @@
 import React from "react";
 
 const BucketSelector = ({ buckets, selectedBucket, onSelect }) => {
-  console.log("Buckets: ", buckets)
   return (
     <div className="p-4 bg-gray-800 text-green-400 rounded-xl shadow-lg">
       <h2 className="text-xl mb-2 font-semibold">Select a Bucket</h2>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Header from "./Header.jsx";
 import FileList from "./FilesList.jsx";
 import LoadingOverlay from "./LoadingOverlay.jsx";
-import { loadChangesFromSession} from "./utils/sessionUtils.js";
+import { loadChangesFromSession, clearAllBucketSessions} from "./utils/sessionUtils.js";
 import BucketSelector from "./BucketSelector.jsx";
 import dayjs from "dayjs";
 function App() {
@@ -10,7 +10,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   // const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
-  const [currentLockFileGeneration, setCurrentLockFileGeneration] = useState();
+  // const [currentLockFileGeneration, setCurrentLockFileGeneration] = useState();
   const [allFiles, setAllFiles] = useState([]); // store full list from backend
   const [page, setPage] = useState(1);
   const [expiredFiles , setExpiredFiles] = useState([]);
@@ -23,6 +23,10 @@ function App() {
     setPage(1);             // reset to page 1 for new search
     setSearch(searchInput); // apply input as actual search
   };
+  useEffect(()=>{
+    clearAllBucketSessions()
+  }, [])
+  
   const fetchFiles = async () => {
     setLoading(true);
     try {
@@ -33,10 +37,11 @@ function App() {
       const res = await fetch(url);
       const data = await res.json();
       // ✅ Re-merge unsaved new files (after loading them from session!)
-      const { newFiles} = loadChangesFromSession(bucketName);
-      
+      const { newFiles, lockChanges } = loadChangesFromSession(bucketName);
+      const { newFilesTemp, lockChangesTemp} = loadChangesFromSession("tempbucket24");
       const now = dayjs().add(30, 'second');
-
+      console.log("Temp24 New Files: ", newFilesTemp);
+      console.log("Temp24 Lock Changes: ", lockChangesTemp);
       // 🧹 Filter out expired & unlocked files
       const filtered = data.files.filter((details) => {
         const filename = details.name;
@@ -56,8 +61,7 @@ function App() {
         (file) => !filteredFilenames.has(file.name)
       );
       const combined = [...filtered || [], ...(uniqueNewFiles || [])];
-      console.log("Combined: ", combined);
-      setCurrentLockFileGeneration(data.currentGeneration);
+      // setCurrentLockFileGeneration(data.currentGeneration);
       setExpiredFiles(expiredAndUnlockedFiles);
       setAllFiles(combined);
       setPage(1);
@@ -111,7 +115,7 @@ function App() {
         page={page}
         setPage={setPage}
         fetchFiles = {fetchFiles}
-        currentLockFileGeneration = {currentLockFileGeneration}
+        // currentLockFileGeneration = {currentLockFileGeneration}
         bucketName = {bucketName}
         buckets = {buckets}
       />

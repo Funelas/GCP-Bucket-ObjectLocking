@@ -72,11 +72,11 @@ class FileUpdate(BaseModel):
     lockstatus: Optional[LockStatus] = None
 class UpdateBatchPayload(BaseModel):
     updates: List[FileUpdate]
-    currentGeneration: Optional[str] = None
 
 
 @app.patch("/update-files-batch")
 def update_files_batch(new_data: UpdateBatchPayload, bucket: str = ""):
+    print(new_data.updates)
     creds = get_credentials(TOKEN_FILE=TOKEN_FILE, CREDENTIALS_FILE=CREDENTIALS_FILE, SCOPES=SCOPES)
     gcs_client = storage.Client(project="bucketdemoproject", credentials=creds)
     bucket_name = bucket
@@ -84,8 +84,10 @@ def update_files_batch(new_data: UpdateBatchPayload, bucket: str = ""):
 
     # 🔁 Step 1: Load locked_objects.json
     latest_blob = bucket.get_blob(f'{bucket_name}_locked_objects.json')
-    if str(new_data.currentGeneration) != str(latest_blob.generation):
-        raise HTTPException(status_code= 409, detail= "Lock File Json Mismatch. Please refresh the page.")
+    if not latest_blob:
+        return
+    # if str(new_data.currentGeneration) != str(latest_blob.generation):
+    #     raise HTTPException(status_code= 409, detail= "Lock File Json Mismatch. Please refresh the page.")
     locked_map, _ = get_locked_file_with_generation(bucket)
     
     # 🧠 Step 2: Update each file individually
@@ -128,7 +130,6 @@ def update_files_batch(new_data: UpdateBatchPayload, bucket: str = ""):
             blob.retention.mode = "Unlocked"
             blob.retention.retain_until_time = retain_until
             blob.update(override_unlocked_retention=True)
-            print(f"Update Metadata: {blob.metadata}")
         # ✅ Update or remove entry in locked_map
         expiry_time = blob.retention.retain_until_time
         now_plus_30s = datetime.now(timezone.utc) + timedelta(seconds=30)
@@ -187,5 +188,4 @@ def get_buckets():
     # bucket_names = [bucket.name for bucket in buckets]
     # return {"buckets": bucket_names}
     bucket_names = [os.getenv(f"BUCKET{i}")for i in range(1,6)]
-    print(bucket_names)
     return bucket_names 

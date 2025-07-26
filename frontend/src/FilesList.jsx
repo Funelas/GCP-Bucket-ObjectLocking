@@ -4,10 +4,10 @@ import MetadataModal from "./MetadataModal.jsx";
 import ObjectLockModal from "./ObjectLockModal.jsx";
 import Pagination from "./Pagination.jsx";
 import LockByUrlInput from "./LockByUrlInput.jsx";
-import { loadChangesFromSession, saveChangesToSession } from "./utils/sessionUtils.js";
+import { loadChangesFromSession, saveChangesToSession , clearAllBucketSessions} from "./utils/sessionUtils.js";
 import LockByIdInput from "./LockByIdInput.jsx";
 
-const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, fetchFiles, currentLockFileGeneration, expiredFiles, bucketName, buckets}) => {
+const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, fetchFiles, expiredFiles, bucketName, buckets}) => {
   const [pages, setPages] = useState(1);
   const [visibleFiles, setVisibleFiles] = useState([]);
 
@@ -36,7 +36,7 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
     setLockChanges(lockChanges);
     setNewFiles(savedNewFiles); // ✅ load new files too
 
-  }, []);
+  }, [allFiles]);
   const getAllChangedBucketNames = () => {
     const bucketNames = new Set();
   
@@ -75,10 +75,15 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
         metadata: {},
         updated_at: now,
       }));
-  
+     
       if (bucket === bucketName) {
-        const updatedAllFiles = [...allFiles, ...generatedNewFiles];
-        const updatedNewFiles = [...newFiles, ...generatedNewFiles];
+        const filteredFiles = generatedNewFiles.filter((file) => 
+          !allFiles.some((f) => f.name === file.name) &&
+          !newFiles.some((f) => f.name === file.name)
+        );
+        console.log("Filtered Files: " , filteredFiles);
+        const updatedAllFiles = [...allFiles, ...filteredFiles];
+        const updatedNewFiles = [...newFiles, ...filteredFiles];
   
         setAllFiles(updatedAllFiles);
         setNewFiles(updatedNewFiles);
@@ -86,9 +91,9 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
         const newTotal = updatedAllFiles.length;
         const newLastPage = Math.ceil(newTotal / pageSize);
         setPage(newLastPage);
-  
-        // Also save to session
-        saveChangesToSession(bucket, metadataChanges, lockChanges, updatedNewFiles,expiredFiles);
+        console.log("Add File to List Updated New Files: ", updatedNewFiles);
+        // Also save to session 
+        saveChangesToSession(bucket, metadataChanges, lockChanges, updatedNewFiles ,expiredFiles);
       } else {
         const {
           metadataChanges: sessionMetadataChanges,
@@ -115,6 +120,13 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
   };
 
   const closeModal = (filename, update = null, updateType = null) => {
+    console.log("Close Modal Filename: ", filename);
+    if (filename === null) {
+      setEditingMetadata(null);
+      setLockingFile(null);
+      setEditingFile(null);
+      return;
+    }
     const filenames = typeof filename === "string" ? { [bucketName]: [filename] } : filename;
   
     for (const [bucket, files] of Object.entries(filenames)) {
@@ -236,13 +248,15 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
     setLoading(true);
     // let updatedFiles = [ ...allFiles ];
     // const allChangedBuckets = getAllChangedBucketNames();
-    // console.log("All Changed Buckets: ", allChangedBuckets);
+    console.log("All Changed Buckets: ", bucketChanges);
     for (const bucket of bucketChanges){
       const {metadataChanges : sessionMetadataChanges,
             lockChanges : sessionLockChanges,
             newFiles : sessionNewFiles,
             expiredFiles : sessionExpiredFiles
-      } = loadChangesFromSession(bucketName);
+      } = loadChangesFromSession(bucket);
+      console.log("Bucket: ", bucket)
+      console.log(sessionLockChanges);
       const formattedExpiredFiles = sessionExpiredFiles.length > 0 ? (sessionExpiredFiles.map((file) => 
         {return {
           "filename" : file.name,
@@ -280,7 +294,6 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
         });
         const new_data = {
           "updates" : combinedUpdates,
-          "currentGeneration" : String(currentLockFileGeneration)
         }
         try {
           const response = await fetch(`http://localhost:8000/update-files-batch?bucket=${bucket}`, {
@@ -294,15 +307,16 @@ const FilesList = ({ setLoading, loading, allFiles, setAllFiles, page, setPage, 
           if (!response.ok) throw new Error("Lock File Generation Mismatch. Please refresh webpage.");
       }catch(err){
         alert(err);
-      }finally{
-        setNewFiles([]);  // ✅ reset new unsaved additions
-        setMetadataChanges({});
-        setLockChanges({});
-        await fetchFiles()
-        alert("✅ All changes saved.");
-        setLoading(false);
       }
+        
     };
+    setNewFiles([]);  // ✅ reset new unsaved additions
+    setMetadataChanges({});
+    setLockChanges({});
+    clearAllBucketSessions();
+    await fetchFiles();
+    alert("✅ All changes saved.");
+    setLoading(false);
     }
     
   

@@ -13,4 +13,18 @@ export function loadChangesFromSession(bucketName) {
   return { metadataChanges: metadata, lockChanges: lock, newFiles, expiredFiles };
 }
 
+export function clearAllBucketSessions() {
+  const keys = Object.keys(sessionStorage);
+  keys.forEach((key) => {
+    if (
+      key.startsWith("metadataChanges-") ||
+      key.startsWith("lockChanges-") ||
+      key.startsWith("newFiles-") ||
+      key.startsWith("expiredFiles-")
+    ) {
+      sessionStorage.removeItem(key);
+    }
+  });
+}
+
 

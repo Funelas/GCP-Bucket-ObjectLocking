@@ -40,7 +40,7 @@ const LockByIdInput = ({ onAddMultiple, onFileAddMultiple, setObjectId, availabl
         }
       }
 
-      if (allResults.length > 0) {
+      if (Object.keys(allResults).length > 0) {
         setResults(allResults);
       } else {
         alert("No matching objects found.");
@@ -105,22 +105,32 @@ const LockByIdInput = ({ onAddMultiple, onFileAddMultiple, setObjectId, availabl
         </button>
       </div>
 
-      {results.length > 0 && (
-        <div className="bg-gray-800 p-4 rounded text-white max-h-60 overflow-y-auto">
-          <p className="mb-2 text-green-300 font-medium">Found {results.length} object(s):</p>
-          <ul className="mb-3 list-disc list-inside text-sm">
-            {results.map((obj, index) => (
-              <li key={index}>{obj}</li>
-            ))}
-          </ul>
-          <button
-            className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded"
-            onClick={handleAddAll}
-          >
-            ➕ Add All
-          </button>
-        </div>
-      )}
+      {Object.keys(results).length > 0 && (
+  <div className="bg-gray-800 p-4 rounded text-white max-h-60 overflow-y-auto">
+    <p className="mb-2 text-green-300 font-medium">
+      Found {Object.values(results).flat().length} object(s) across {Object.keys(results).length} bucket(s):
+    </p>
+    <ul className="mb-3 list-disc list-inside text-sm">
+      {Object.entries(results).map(([bucket, files]) => (
+          <li key={bucket}>
+            <span className="font-semibold text-yellow-400">{bucket}:</span>
+            <ul className="list-disc ml-6 mt-1">
+              {files.map((file, idx) => (
+                <li key={idx}>{file}</li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+      <button
+        className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded"
+        onClick={handleAddAll}
+      >
+        ➕ Add All
+      </button>
+    </div>
+  )}
+
     </div>
   );
 };
