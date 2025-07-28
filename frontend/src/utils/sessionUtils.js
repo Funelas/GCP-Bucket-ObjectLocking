@@ -27,4 +27,17 @@ export function clearAllBucketSessions() {
   });
 }
 
-
+ export const getAllChangedBucketNames = () => {
+    const bucketNames = new Set();
+  
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      const match = key.match(/^(metadataChanges|lockChanges|newFiles|expiredFiles)-(.+)$/);
+      if (match) {
+        const bucketName = match[2];
+        bucketNames.add(bucketName);
+      }
+    }
+  
+    return Array.from(bucketNames);
+  };

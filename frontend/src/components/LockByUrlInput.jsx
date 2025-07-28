@@ -1,8 +1,6 @@
 import React, { useState } from "react";
-import ObjectLockModal from "./ObjectLockModal.jsx";
 const LockByUrlInput = ({ onAdd, onFileAdd, bucketName }) => {
     const [url, setUrl] = useState("");
-    const [filename, setFilename] = useState(null);
   
     const handleExtractFilename = (inputUrl) => {
       try {

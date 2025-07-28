@@ -110,7 +110,7 @@ def get_locked_file_with_generation(bucket):
     return locked_data, blob.generation
 
 
-def update_locked_file(bucket, new_data: dict, generation: Optional[int]):
+def update_locked_file(bucket, new_data: dict):
     blob = bucket.blob(f"{bucket.name}_locked_objects.json")
 
     # 1. Release temporary hold (and commit it)
@@ -120,8 +120,7 @@ def update_locked_file(bucket, new_data: dict, generation: Optional[int]):
     # 2. Upload updated content (with generation check)
     blob.upload_from_string(
         json.dumps(new_data, indent=2),
-        content_type="application/json",
-        if_generation_match=generation
+        content_type="application/json"
     )
 
     # 3. Reapply temporary hold (optional)

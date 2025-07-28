@@ -1,5 +1,4 @@
 import React from "react";
-import LockByUrlInput from "./LockByUrlInput.jsx";
 const Header = ({ searchInput, setSearchInput, onSearchSubmit }) => {
   const handleKeyDown = (e) => {
     if (e.key === "Enter") {
